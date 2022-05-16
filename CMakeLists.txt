@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 
-project(fmindex)
+project(Nexus)
 
 # add pop count, c++ version and compiler warnings
 add_compile_options(-mpopcnt -std=gnu++14 -Wall -pedantic)
@@ -10,16 +10,11 @@ add_library(AuxiliaryClasses src/range.cpp src/fmindex.cpp src/nucleotide.cpp sr
 #add_compile_definitions(ALPHABET=6)
 add_definitions(-DALPHABET=6)
 
-#add_executable(columba src/parallel.cpp   src/fastq.cpp src/seqfile.cpp src/util.cpp )
-#target_link_libraries(columba AuxiliaryClasses )
-
 add_executable(columba src/main.cpp   )
 target_link_libraries(columba AuxiliaryClasses )
 
 add_executable(nexus src/mainDBG.cpp src/benchmarking.cpp)
 target_link_libraries(nexus AuxiliaryClasses )
-
-# add_executable(columba_build src/buildIndex.cpp src/buildIndexAuxiliary.cpp)
 
 add_executable(nexusBuild src/buildDBG.cpp)
 target_link_libraries(nexusBuild AuxiliaryClasses )
@@ -60,23 +55,8 @@ else (SPARSEHASH_FOUND)
             "-DSPARSEHASH_INCLUDE_DIR=<path-to-sparsehash>/include .")
 endif(SPARSEHASH_FOUND)
 
-# check if zlib is present
-find_package(ZLIB)
-if (ZLIB_FOUND)
-    add_definitions(-DHAVE_ZLIB)
-    include_directories(${ZLIB_INCLUDE_DIR})
-endif(ZLIB_FOUND)
-
-target_link_libraries(columba pthread)
-
-if (ZLIB_FOUND)
-        target_link_libraries(columba ${ZLIB_LIBRARY})
-endif (ZLIB_FOUND)
-
 install(TARGETS columba DESTINATION bin)
-#install(TARGETS columba_seq DESTINATION bin)
 install(TARGETS nexus DESTINATION bin)
-#install(TARGETS columba_build DESTINATION bin)
 install(TARGETS nexusBuild DESTINATION bin)
 install(TARGETS createStyles DESTINATION bin)
 install(TARGETS visualizePath DESTINATION bin)

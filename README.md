@@ -56,7 +56,7 @@ make
 Nexus aligns reads to a compressed pan-genome de Bruijn graph. To do this you need to build the implicit representation of this graph, along with the underlying bidirectional FM-index, based on the input data. Currently we only support input data with an alphabet of length 6 (for DNA: A, C, G, T + separation characters: $, %). Both separation character must be present to guarantee correct functionality. In other words, at least two genome strains should be included.
 
 Nexus integrates code from three external repositories:
-* [Columba](https://github.com/biointec/columba) is base of the search schemes implementation
+* [Columba](https://github.com/biointec/columba) is the base of the search schemes implementation
 * [radixSA64](https://github.com/mariusmni/radixSA64) for building suffix arrays
 * [sux](https://github.com/vigna/sux) for bit vector rank and select support
 
