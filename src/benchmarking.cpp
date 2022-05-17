@@ -305,7 +305,8 @@ double findMedian(vector<length_t> a, int n) {
 template <class T, class positionClass>
 double doBenchSFI(vector<pair<string, string>>& reads, T& index,
                   SearchStrategyDBG<T, positionClass>* strategy,
-                  string readsFile, length_t ED, string outputFile) {
+                  string readsFile, length_t ED, string cpSparse,
+                  string outputFile) {
 
     if (outputFile == "") {
         outputFile = readsFile + "_output.txt";
@@ -325,7 +326,9 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
     cout << "Strain-fixed read mapping with " << strategy->getName()
          << " strategy for max distance " << ED << " with "
          << strategy->getPartitioningStrategy() << " partitioning and using "
-         << strategy->getDistanceMetric() << " distance " << endl;
+         << strategy->getDistanceMetric()
+         << " distance and using checkpoint sparseness factor " << cpSparse
+         << endl;
     cout.precision(2);
 
     vector<std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>>
@@ -415,7 +418,7 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
          << allReportedNodePaths / (double)(reads.size()) << endl;
     cout << "Total no. reported node paths: " << allReportedNodePaths << "\n";
     cout << "Mapped reads :" << mappedReads << endl;
-    cout << "Median number of occurrences per read "
+    cout << "Median number of unique matches per read "
          << findMedian(numberMatchesPerRead, numberMatchesPerRead.size())
          << endl;
     cout << "Average no. graph nodes: "
@@ -528,14 +531,14 @@ double doBenchSFR(vector<pair<string, string>>& reads,
          << allReportedMatches / (double)(reads.size()) << endl;
     cout << "Total no. reported node paths: " << allReportedMatches << "\n";
     cout << "Mapped reads :" << mappedReads << endl;
-    cout << "Median number of occurrences per read "
+    cout << "Median number of unique node paths per read "
          << findMedian(numberMatchesPerRead, numberMatchesPerRead.size())
          << endl;
     cout << "Average no. graph nodes: "
          << totalDBGNodes / (double)(reads.size()) << endl;
     cout << "Total no. graph nodes: " << totalDBGNodes << "\n";
-    cout << "Total no. special filter cases: " << totalFilterSpecialCases
-         << "\n";
+    // cout << "Total no. special filter cases: " << totalFilterSpecialCases
+    //      << "\n";
 
     writeToOutputSFR(outputFile, matchesPerRead, reads, index);
     return elapsed.count();
@@ -544,4 +547,4 @@ double doBenchSFR(vector<pair<string, string>>& reads,
 template double doBenchSFI<FMIndexDBG<FMPos>, FMPos>(
     vector<pair<string, string>>& reads, FMIndexDBG<FMPos>& index,
     SearchStrategyDBG<FMIndexDBG<FMPos>, FMPos>* strategy, string readsFile,
-    length_t ED, string outputFile);
+    length_t ED, string cpSparse, string outputFile);

@@ -58,7 +58,8 @@ double findMedian(vector<length_t> a, int n);
 template <class T, class positionClass>
 double doBenchSFI(vector<pair<string, string>>& reads, T& mapper,
                   SearchStrategyDBG<T, positionClass>* strategy,
-                  string readsFile, length_t ED, std::string outputFile = "");
+                  string readsFile, length_t ED, string cpSparse,
+                  std::string outputFile = "");
 
 double doBenchSFR(vector<pair<string, string>>& reads,
                   FMIndexDBG<FMPosSFR>& mapper,

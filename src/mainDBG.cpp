@@ -401,7 +401,7 @@ int main(int argc, char* argv[]) {
             throw runtime_error(searchscheme +
                                 " is not on option as search scheme");
         }
-        doBenchSFI(reads, bwt, strategy, readsFile, ed);
+        doBenchSFI(reads, bwt, strategy, readsFile, ed, cpSparse);
         delete strategy;
 
         // try {
