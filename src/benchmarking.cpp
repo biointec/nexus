@@ -322,7 +322,7 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
     size_t totalNodePaths = 0;
     size_t allReportedNodePaths = 0;
 
-    cout << "Benchmarking with " << strategy->getName()
+    cout << "Strain-fixed read mapping with " << strategy->getName()
          << " strategy for max distance " << ED << " with "
          << strategy->getPartitioningStrategy() << " partitioning and using "
          << strategy->getDistanceMetric() << " distance " << endl;
@@ -402,9 +402,6 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
     cout << "Average no. index nodes: " << totalNodes / (double)(reads.size())
          << endl;
     cout << "Total no. index nodes: " << totalNodes << "\n";
-    cout << "Average no. matrix elements written: "
-         << totalMatrixElements / (double)(reads.size()) << endl;
-    cout << "Total no. matrix elements: " << totalMatrixElements << "\n";
     cout << "Average no. unique matches: "
          << totalUniqueMatches / (double)(reads.size()) << endl;
     cout << "Total no. unique matches: " << totalUniqueMatches << "\n";
@@ -451,7 +448,7 @@ double doBenchSFR(vector<pair<string, string>>& reads,
     size_t totalDBGNodes = 0;
     size_t totalFilterSpecialCases = 0;
 
-    cout << "Strain-free benchmarking with " << index.getFilteringOption()
+    cout << "Strain-free read mapping with " << index.getFilteringOption()
          << " filtering, with " << strategy->getName()
          << " strategy for max distance " << ED << " with "
          << strategy->getPartitioningStrategy() << " partitioning, using "
@@ -524,9 +521,6 @@ double doBenchSFR(vector<pair<string, string>>& reads,
     cout << "Average no. index nodes: " << totalNodes / (double)(reads.size())
          << endl;
     cout << "Total no. index nodes: " << totalNodes << "\n";
-    cout << "Average no. matrix elements written: "
-         << totalMatrixElements / (double)(reads.size()) << endl;
-    cout << "Total no. matrix elements: " << totalMatrixElements << "\n";
     cout << "Average no. unique node paths: "
          << totalUniqueMatches / (double)(reads.size()) << endl;
     cout << "Total no. unique node paths: " << totalUniqueMatches << "\n";
