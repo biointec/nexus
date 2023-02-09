@@ -659,7 +659,9 @@ We now want to visualize the subgraph around node path `{551,73827}` (which was 
 The result can now be found in `EscherichiaColi4Strains_SubgraphEdges.tsv`. You can now visualize the subgraph in Cytoscape as described above. This should show one of the subgraphs from the image above.
 
 
-
+Questions and suggestions can be directed to:
+* Lore.Depuydt@Ugent.be 
+* Jan.Fostier@Ugent.be
 
 <!-- # Reproducing Results
 The results from our paper 'Lossless Approximate Pattern Matching on Pan-genome de Bruijn Graphs' can be reproduced by using the following instructions.
