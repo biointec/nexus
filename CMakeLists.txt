@@ -9,6 +9,8 @@ include_directories("${PROJECT_SOURCE_DIR}/radixSA64/")
 
 include_directories("${PROJECT_SOURCE_DIR}/longestcommonprefix/")
 
+include_directories("${PROJECT_SOURCE_DIR}/casestudy/")
+
 include_directories("${PROJECT_SOURCE_DIR}/libdivsufsort/include/")
 find_library(SA_LIB NAMES divsufsort64 libdivsufsort64 libdivsufsort64.so PATHS "${PROJECT_SOURCE_DIR}/libdivsufsort/lib" "${PROJECT_SOURCE_DIR}/libdivsufsort" NO_DEFAULT_PATH REQUIRED)
 if(NOT SA_LIB)
@@ -41,6 +43,9 @@ target_link_libraries(visualizeRead AuxiliaryClasses)
 
 add_executable(visualizePath src/visualizePath.cpp)
 target_link_libraries(visualizePath AuxiliaryClasses)
+
+add_executable(casestudy casestudy/casestudy.cpp)
+target_link_libraries(casestudy AuxiliaryClasses)
 
 
 # set the module path

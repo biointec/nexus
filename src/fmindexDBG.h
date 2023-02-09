@@ -37,10 +37,20 @@
 // CLASS FM-INDEX DBG
 // ============================================================================
 
+template <class T, class positionClass> class SearchStrategyDBG;
+
 template <class positionClass>
 class FMIndexDBG : public FMIndex<positionClass> {
     friend class FMPos;
     friend class FMPosSFR;
+
+    friend void handleMutation(
+        const size_t& k, const FMIndexDBG<FMPos>& bwt,
+        const SearchStrategyDBG<FMIndexDBG<FMPos>, FMPos>* strategy,
+        std::set<uint32_t> neighboringNodesOnly, const Range& rpoBRange,
+        const Range& rpoCRange, const Range& rpoARange, const Range& RRDR_range,
+        const std::string& mutationName, const std::string& mutationSequence,
+        const uint32_t& offsetOld, std::ofstream& outputFile);
 
   private:
     using FMIndex<positionClass>::textLength;
