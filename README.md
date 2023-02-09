@@ -18,6 +18,8 @@ author = {Luca Renders and Kathleen Marchal and Jan Fostier},
 keywords = {Algorithms, Bioinformatics, Computer science, High-performance computing in bioinformatics},
 ```--->
 
+**Important:** To use Nexus v1.1.0 instead of v1.0.0, the index must be rebuilt. 
+
 These instructions will get you a copy of the project up and running on your local machine.
 
 #  Prerequisites
