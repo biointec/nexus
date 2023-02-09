@@ -5,7 +5,19 @@ project(Nexus)
 # add pop count, c++ version and compiler warnings
 add_compile_options(-mpopcnt -std=gnu++14 -Wall -pedantic)
 
-add_library(AuxiliaryClasses src/range.cpp src/fmindex.cpp src/nucleotide.cpp src/searchstrategy.cpp src/buildIndexAuxiliary.cpp src/fmpos.cpp src/fmocc.cpp src/search.cpp src/fmindexDBG.cpp src/strainfreemapper.cpp)
+include_directories("${PROJECT_SOURCE_DIR}/radixSA64/")
+
+include_directories("${PROJECT_SOURCE_DIR}/longestcommonprefix/")
+
+include_directories("${PROJECT_SOURCE_DIR}/libdivsufsort/include/")
+find_library(SA_LIB NAMES divsufsort64 libdivsufsort64 libdivsufsort64.so PATHS "${PROJECT_SOURCE_DIR}/libdivsufsort/lib" "${PROJECT_SOURCE_DIR}/libdivsufsort" NO_DEFAULT_PATH REQUIRED)
+if(NOT SA_LIB)
+  message(FATAL_ERROR "divsufsort64 library not found")
+endif()
+
+add_library(AuxiliaryClasses src/range.cpp src/fmindex.cpp src/nucleotide.cpp src/searchstrategy.cpp src/buildIndexAuxiliary.cpp src/fmpos.cpp src/fmocc.cpp src/search.cpp src/fmindexDBG.cpp src/strainfreemapper.cpp longestcommonprefix/longestCommonPrefix.cpp)
+
+target_link_libraries(AuxiliaryClasses "${SA_LIB}" )
 
 #add_compile_definitions(ALPHABET=6)
 add_definitions(-DALPHABET=6)
@@ -15,6 +27,9 @@ target_link_libraries(columba AuxiliaryClasses )
 
 add_executable(nexus src/mainDBG.cpp src/benchmarking.cpp)
 target_link_libraries(nexus AuxiliaryClasses )
+
+add_executable(nexusStats src/mainstats.cpp)
+target_link_libraries(nexusStats AuxiliaryClasses )
 
 add_executable(nexusBuild src/buildDBG.cpp)
 target_link_libraries(nexusBuild AuxiliaryClasses )

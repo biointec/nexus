@@ -107,6 +107,17 @@ class Range {
     }
 
     /**
+     * @brief Check if the range contains a certain index
+     *
+     * @param position index to be checked
+     * @return true if the index lies within the range
+     * @return false otherwise
+     */
+    bool contains(const length_t& position) const {
+        return begin <= position && position < end;
+    }
+
+    /**
      * @brief Operator overloading. Outputs the range as [begin, end) to the
      * outputstream
      *

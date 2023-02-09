@@ -32,30 +32,6 @@ using namespace std;
 vector<string> schemes = {"kuch1",  "kuch2", "kianfar", "manbest",
                           "pigeon", "01*0",  "custom",  "naive"};
 
-template <class T>
-void printMatches(vector<TextOccurrence> matches, string text, bool printLine,
-                  string duration, FMIndex<T>& index, string name) {
-
-    cout << endl;
-
-    cout << name << ":\tduration: " << duration
-         << "µs\t nodes visited: " << index.getNodes()
-         << "\t matrix elements written: " << index.getMatrixElements()
-         << "\t startpositions reported: " << index.getTotalReported()
-         << " #matches: " << matches.size() << endl;
-
-    for (auto match : matches) {
-        cout << "Found match at position " << match.getRange().getBegin()
-             << " with ED " << match.getDistance() << endl;
-
-        cout << "\tCorresponding substring:\t"
-             << text.substr(match.getRange().getBegin(),
-                            match.getRange().getEnd() -
-                                match.getRange().getBegin())
-             << endl;
-    }
-}
-
 string getFileExt(const string& s) {
 
     size_t i = s.rfind('.', s.length());
@@ -66,9 +42,23 @@ string getFileExt(const string& s) {
     return ("");
 }
 
-vector<pair<string, string>> getReads(const string& file) {
-    vector<pair<string, string>> reads;
-    reads.reserve(200000);
+size_t getReads(vector<pair<string, string>>& reads, string& file,
+                ifstream& ifile, size_t chunkSize, string& line,
+                bool readWithN) {
+
+    string read = "";
+    string p = "";
+
+    size_t chunkCounter = 0;
+    bool readLine = false;
+
+    // Read first line of chunk
+    if (!line.empty() && (line[0] == '>' || line[0] == '@')) {
+        p = (line.substr(1));
+        readLine = true;
+    }
+
+    reads.reserve(2 * chunkSize);
 
     const auto& extension = getFileExt(file);
 
@@ -76,7 +66,6 @@ vector<pair<string, string>> getReads(const string& file) {
         (extension == "FASTA") || (extension == "fasta") || (extension == "fa");
     bool fastq = (extension == "fq") || (extension == "fastq");
 
-    ifstream ifile(file.c_str());
     if (!ifile) {
         throw runtime_error("Cannot open file " + file);
     }
@@ -88,9 +77,9 @@ vector<pair<string, string>> getReads(const string& file) {
         }
         string line;
         // get the first line we do not need this
-        getline(ifile, line);
+        std::getline(ifile, line);
 
-        while (getline(ifile, line)) {
+        while (std::getline(ifile, line)) {
             istringstream iss{line};
 
             vector<string> tokens;
@@ -107,19 +96,20 @@ vector<pair<string, string>> getReads(const string& file) {
             reads.push_back(make_pair(p, read));
         }
     } else if (fasta) {
-        // fasta file
-        string read = "";
-        string p = "";
-        string line;
-        while (getline(ifile, line)) {
+        while (chunkCounter < chunkSize && std::getline(ifile, line)) {
             if (!line.empty() && line[0] == '>') {
 
                 if (!read.empty()) {
-
-                    reads.push_back(make_pair(p, read));
-                    reads.push_back(
-                        make_pair(p, Nucleotide::getRevCompl(read)));
-                    read.clear();
+                    // Ignore reads containing N
+                    if (read.find('N') == std::string::npos) {
+                        reads.push_back(make_pair(p, read));
+                        reads.push_back(
+                            make_pair(p, Nucleotide::getRevCompl(read)));
+                        read.clear();
+                        chunkCounter++;
+                    } else {
+                        readWithN = true;
+                    }
                 }
 
                 p = (line.substr(1));
@@ -129,27 +119,32 @@ vector<pair<string, string>> getReads(const string& file) {
             }
         }
         if (!read.empty()) {
-
-            reads.push_back(make_pair(p, read));
-            reads.push_back(make_pair(p, Nucleotide::getRevCompl(read)));
-            read.clear();
+            // Ignore reads containing N
+            if (read.find('N') == std::string::npos) {
+                reads.push_back(make_pair(p, read));
+                reads.push_back(make_pair(p, Nucleotide::getRevCompl(read)));
+                read.clear();
+                chunkCounter++;
+            } else {
+                readWithN = true;
+            }
         }
     } else {
         // fastQ
-        string read = "";
-        string id = "";
-        string line;
-        bool readLine = false;
-        while (getline(ifile, line)) {
+        while (chunkCounter < chunkSize && std::getline(ifile, line)) {
             if (!line.empty() && line[0] == '@') {
                 if (!read.empty()) {
-
-                    reads.push_back(make_pair(id, read));
-                    reads.push_back(
-                        make_pair(id, Nucleotide::getRevCompl(read)));
-                    read.clear();
+                    if (read.find('N') == std::string::npos) {
+                        reads.push_back(make_pair(p, read));
+                        reads.push_back(
+                            make_pair(p, Nucleotide::getRevCompl(read)));
+                        read.clear();
+                        chunkCounter++;
+                    } else {
+                        readWithN = true;
+                    }
                 }
-                id = (line.substr(1));
+                p = (line.substr(1));
                 readLine = true;
             } else if (readLine) {
                 read = line;
@@ -157,14 +152,17 @@ vector<pair<string, string>> getReads(const string& file) {
             }
         }
         if (!read.empty()) {
-
-            reads.push_back(make_pair(id, read));
-            reads.push_back(make_pair(id, Nucleotide::getRevCompl(read)));
-            read.clear();
+            if (read.find('N') == std::string::npos) {
+                reads.push_back(make_pair(p, read));
+                reads.push_back(make_pair(p, Nucleotide::getRevCompl(read)));
+                read.clear();
+                chunkCounter++;
+            } else {
+                readWithN = true;
+            }
         }
     }
-
-    return reads;
+    return chunkCounter;
 }
 
 double
@@ -182,25 +180,34 @@ void writeToOutputSFI(
     const string& file,
     const vector<std::map<std::vector<uint32_t>,
                           std::vector<TextOccurrenceSFI>>>& mPerRead,
-    const vector<pair<string, string>>& reads) {
+    const vector<pair<string, string>>& reads, bool& firstChunk, ofstream& f2) {
 
-    cout << "Writing to output file " << file << " ..." << endl;
-    ofstream f2;
-    f2.open(file);
+    if (firstChunk) {
+        // Write header
+        firstChunk = false;
 
-    f2 << "Identifier\tSubgraphID\tPath\tStrain\tPosition\tLength\tED\treverseC"
-          "omplement\n";
+        // cout << "Writing to output file " << file << " ..." << endl;
+
+        f2 << "Identifier\tSubgraphID\tPath\tDistanceFromLeftEnd\tStrain\t"
+              "Position\tLength\tED\treverseComplement\n";
+    }
+
     for (unsigned int i = 0; i < reads.size(); i += 2) {
         auto id = reads[i].first;
 
         int counter = 0;
         for (const auto& path : mPerRead[i]) {
             for (length_t i = 0; i < path.second.size(); i++) {
+                // For occurrences shorter than k, use / to show that the nodes
+                // do not form a path, but a set of possibilities
+                char separationchar =
+                    path.second[i].getRange().width() < k_DBG ? '/' : ',';
                 f2 << id << "\t" << counter << "\t" << path.first[0];
                 for (length_t i = 1; i < path.first.size(); i++) {
-                    f2 << "," << path.first[i];
+                    f2 << separationchar << path.first[i];
                 }
-                f2 << "\t" << path.second[i].getStrain() << "\t"
+                f2 << "\t" << path.second[i].getDistanceFromLeftEnd() << "\t"
+                   << path.second[i].getStrain() << "\t"
                    << path.second[i].getRange().getBegin() << "\t"
                    << path.second[i].getRange().width() << "\t"
                    << path.second[i].getDistance() << "\t0\n";
@@ -210,11 +217,16 @@ void writeToOutputSFI(
 
         for (const auto& path : mPerRead[i + 1]) {
             for (length_t i = 0; i < path.second.size(); i++) {
+                // For occurrences shorter than k, use / to show that the nodes
+                // do not form a path, but a set of possibilities
+                char separationchar =
+                    path.second[i].getRange().width() < k_DBG ? '/' : ',';
                 f2 << id << "\t" << counter << "\t" << path.first[0];
                 for (length_t i = 1; i < path.first.size(); i++) {
-                    f2 << "," << path.first[i];
+                    f2 << separationchar << path.first[i];
                 }
-                f2 << "\t" << path.second[i].getStrain() << "\t"
+                f2 << "\t" << path.second[i].getDistanceFromLeftEnd() << "\t"
+                   << path.second[i].getStrain() << "\t"
                    << path.second[i].getRange().getBegin() << "\t"
                    << path.second[i].getRange().width() << "\t"
                    << path.second[i].getDistance() << "\t1\n";
@@ -222,30 +234,36 @@ void writeToOutputSFI(
             counter++;
         }
     }
-    f2.close();
 }
 
 void writeToOutputSFR(const string& file,
                       const std::vector<std::vector<FMOccSFR>>& mPerRead,
                       const vector<pair<string, string>>& reads,
-                      FMIndexDBG<FMPosSFR>& index) {
+                      bool& firstChunk, ofstream& f2) {
 
-    cout << "Writing to output file " << file << " ..." << endl;
-    ofstream f2;
-    f2.open(file);
+    if (firstChunk) {
+        // Write header
+        firstChunk = false;
 
-    f2 << "Identifier\tSubgraphID\tPath\tDistanceFromLeftEnd\tLength\tED\trever"
-          "seC"
-          "omplement\n";
+        // cout << "Writing to output file " << file << " ..." << endl;
+
+        f2 << "Identifier\tSubgraphID\tPath\tDistanceFromLeftEnd\tLength\tED\t"
+              "reverseComplement\n";
+    }
+
     for (unsigned int i = 0; i < reads.size(); i += 2) {
         auto id = reads[i].first;
 
         int counter = 0;
         for (const auto& path : mPerRead[i]) {
+            // For occurrences shorter than k, use / to show that the nodes
+            // do not form a path, but a set of possibilities
+            char separationchar =
+                path.getPosition().getTrueDepth() < k_DBG ? '/' : ',';
             vector<uint32_t> nodepath = path.getPosition().getNodePath();
             f2 << id << "\t" << counter << "\t" << nodepath[0];
             for (length_t i = 1; i < nodepath.size(); i++) {
-                f2 << "," << nodepath[i];
+                f2 << separationchar << nodepath[i];
             }
             f2 << "\t" << path.getPosition().getDistanceFromLeftEnd() << "\t"
                << path.getPosition().getTrueDepth() << "\t"
@@ -254,21 +272,21 @@ void writeToOutputSFR(const string& file,
         }
 
         for (const auto& path : mPerRead[i + 1]) {
+            // For occurrences shorter than k, use / to show that the nodes
+            // do not form a path, but a set of possibilities
+            char separationchar =
+                path.getPosition().getTrueDepth() < k_DBG ? '/' : ',';
             vector<uint32_t> nodepath = path.getPosition().getNodePath();
             f2 << id << "\t" << counter << "\t" << nodepath[0];
             for (length_t i = 1; i < nodepath.size(); i++) {
-                f2 << "," << nodepath[i];
+                f2 << separationchar << nodepath[i];
             }
-            // int id, l;
-            // index.findID(path.getPosition().getRanges().getRangeSA().getBegin(),
-            //              id, l);
             f2 << "\t" << path.getPosition().getDistanceFromLeftEnd() << "\t"
                << path.getPosition().getTrueDepth() << "\t"
                << path.getDistance() << "\t1\n";
             counter++;
         }
     }
-    f2.close();
 }
 
 double findMedian(vector<length_t> a, int n) {
@@ -303,13 +321,12 @@ double findMedian(vector<length_t> a, int n) {
 }
 
 template <class T, class positionClass>
-double doBenchSFI(vector<pair<string, string>>& reads, T& index,
-                  SearchStrategyDBG<T, positionClass>* strategy,
+double doBenchSFI(T& index, SearchStrategyDBG<T, positionClass>* strategy,
                   string readsFile, length_t ED, string cpSparse,
                   string outputFile) {
 
     if (outputFile == "") {
-        outputFile = readsFile + "_output.txt";
+        outputFile = readsFile + "_output.tsv";
     }
 
     size_t totalNodes = 0;
@@ -322,6 +339,11 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
     size_t totalDBGNodes = 0;
     size_t totalNodePaths = 0;
     size_t allReportedNodePaths = 0;
+    chrono::duration<double> elapsedNodepaths =
+        std::chrono::duration<double>::zero();
+    chrono::duration<double> elapsedSAtoText =
+        std::chrono::duration<double>::zero();
+    chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
     cout << "Strain-fixed read mapping with " << strategy->getName()
          << " strategy for max distance " << ED << " with "
@@ -331,106 +353,160 @@ double doBenchSFI(vector<pair<string, string>>& reads, T& index,
          << endl;
     cout.precision(2);
 
-    vector<std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>>
-        matchesPerRead = {};
-    matchesPerRead.reserve(reads.size());
+    // Read and write input in chunks
+    size_t chunkSize = 10000;
+    bool firstChunk = true;
+    size_t nrOfReads = 0;
+    string currentLine = "";
+
+    ifstream ifile(readsFile.c_str());
+    ofstream f2;
+    f2.open(outputFile);
+
+    bool readWithN = false;
 
     std::vector<length_t> numberMatchesPerRead;
-    numberMatchesPerRead.reserve(reads.size());
 
-    auto start = chrono::high_resolution_clock::now();
-    for (unsigned int i = 0; i < reads.size(); i += 2) {
+    while (ifile) {
 
-        const auto& p = reads[i];
-
-        auto originalPos = p.first;
-        string read = p.second;
-        string revCompl = reads[i + 1].second;
-
-        if (((i >> 1) - 1) % (8192 / (1 << ED)) == 0) {
-            cout << "Progress: " << i / 2 << "/" << reads.size() / 2 << "\r";
-            cout.flush();
+        // cout << "Reading in reads from " << readsFile << endl;
+        vector<pair<string, string>> reads;
+        reads.reserve(chunkSize * 2);
+        try {
+            nrOfReads += getReads(reads, readsFile, ifile, chunkSize,
+                                  currentLine, readWithN);
+        } catch (const exception& e) {
+            string er = e.what();
+            er += " Did you provide a valid reads file?";
+            throw runtime_error(er);
         }
 
-        std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>
-            matches = strategy->matchApproxSFI(read, ED);
-        int nr_of_matches = 0;
-        for (auto const& p : matches) {
-            nr_of_matches += p.second.size();
+        auto start = chrono::high_resolution_clock::now();
+
+        vector<std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>>
+            matchesPerRead = {};
+        matchesPerRead.reserve(reads.size());
+
+        numberMatchesPerRead.reserve(reads.size() +
+                                     numberMatchesPerRead.size());
+
+        for (unsigned int i = 0; i < reads.size(); i += 2) {
+
+            const auto& p = reads[i];
+
+            auto originalPos = p.first;
+            string read = p.second;
+            string revCompl = reads[i + 1].second;
+
+            if ((((i + 2 * nrOfReads - reads.size()) >> 1) - 1) %
+                    (8192 / (1 << ED)) ==
+                0) {
+                cout << "Progress: " << (i + 2 * nrOfReads - reads.size()) / 2
+                     << " reads done.\r";
+                cout.flush();
+            }
+
+            const auto& matches = strategy->matchApproxSFI(read, ED);
+            int nr_of_matches = 0;
+            for (auto const& p : matches) {
+                nr_of_matches += p.second.size();
+            }
+
+            totalNodes += index.getNodes();
+            totalDBGNodes += index.getDBGNodes();
+            totalMatrixElements += index.getMatrixElements();
+            allReportedMatches += index.getTotalReported();
+            totalUniqueMatches += nr_of_matches;
+            mappedReadsForward += !matches.empty();
+            totalNodePaths += matches.size();
+            allReportedNodePaths += index.getTotalReportedNodePaths();
+            elapsedNodepaths += index.getNodePathDuration();
+            elapsedSAtoText += index.getSADuration();
+
+            // do the same for the reverse complement
+            const auto& matchesRevCompl =
+                strategy->matchApproxSFI(revCompl, ED);
+            int nr_of_matchesRevCompl = 0;
+            for (auto const& p : matchesRevCompl) {
+                nr_of_matchesRevCompl += p.second.size();
+            }
+
+            totalNodes += index.getNodes();
+            totalDBGNodes += index.getDBGNodes();
+            totalMatrixElements += index.getMatrixElements();
+            allReportedMatches += index.getTotalReported();
+            totalUniqueMatches += nr_of_matchesRevCompl;
+            mappedReadsBackward += !matchesRevCompl.empty();
+            totalNodePaths += matchesRevCompl.size();
+            allReportedNodePaths += index.getTotalReportedNodePaths();
+            elapsedNodepaths += index.getNodePathDuration();
+            elapsedSAtoText += index.getSADuration();
+
+            mappedReads += !(matchesRevCompl.empty() && matches.empty());
+
+            matchesPerRead.push_back(matches);
+            matchesPerRead.push_back(matchesRevCompl);
+            numberMatchesPerRead.push_back(nr_of_matches +
+                                           nr_of_matchesRevCompl);
         }
 
-        totalNodes += index.getNodes();
-        totalDBGNodes += index.getDBGNodes();
-        totalMatrixElements += index.getMatrixElements();
-        allReportedMatches += index.getTotalReported();
-        totalUniqueMatches += nr_of_matches;
-        mappedReadsForward += !matches.empty();
-        totalNodePaths += matches.size();
-        allReportedNodePaths += index.getTotalReportedNodePaths();
-
-        // do the same for the reverse complement
-        auto matchesRevCompl = strategy->matchApproxSFI(revCompl, ED);
-        int nr_of_matchesRevCompl = 0;
-        for (auto const& p : matchesRevCompl) {
-            nr_of_matchesRevCompl += p.second.size();
-        }
-
-        totalNodes += index.getNodes();
-        totalDBGNodes += index.getDBGNodes();
-        totalMatrixElements += index.getMatrixElements();
-        allReportedMatches += index.getTotalReported();
-        totalUniqueMatches += nr_of_matchesRevCompl;
-        mappedReadsBackward += !matchesRevCompl.empty();
-        totalNodePaths += matchesRevCompl.size();
-        allReportedNodePaths += index.getTotalReportedNodePaths();
-
-        mappedReads += !(matchesRevCompl.empty() && matches.empty());
-
-        matchesPerRead.push_back(matches);
-        matchesPerRead.push_back(matchesRevCompl);
-        numberMatchesPerRead.push_back(nr_of_matches + nr_of_matchesRevCompl);
+        auto finish = chrono::high_resolution_clock::now();
+        elapsed += finish - start;
+        writeToOutputSFI(outputFile, matchesPerRead, reads, firstChunk, f2);
     }
+
+    if (readWithN) {
+        cout << "Caution, reads containing an N were ignored.\n";
+    }
+
+    f2.close();
 
     if (ED == 0) {
         allReportedMatches = totalUniqueMatches;
     }
 
-    auto finish = chrono::high_resolution_clock::now();
-    chrono::duration<double> elapsed = finish - start;
-    cout << "Progress: " << reads.size() << "/" << reads.size() << "\n";
+    elapsedSAtoText -= elapsedNodepaths;
+    chrono::duration<double> FMIndexElapsed =
+        elapsed - elapsedSAtoText - elapsedNodepaths;
+    cout << "Progress: " << nrOfReads << "/" << nrOfReads << "\n";
     cout << "Results for " << strategy->getName() << endl;
 
+    cout << "Time for finding the occurrences in the bidirectional FM-index: "
+         << fixed << FMIndexElapsed.count() << "s\n";
+    cout << "Time for finding the node path: " << fixed
+         << elapsedNodepaths.count() << "s\n";
+    cout << "Time for finding the occurrences in the reference text along with "
+            "the corresponding strain: "
+         << fixed << elapsedSAtoText.count() << "s\n";
     cout << "Total duration: " << fixed << elapsed.count() << "s\n";
 
-    cout << "Average no. index nodes: " << totalNodes / (double)(reads.size())
+    cout << "Average no. index nodes: " << totalNodes / (double)(nrOfReads)
          << endl;
     cout << "Total no. index nodes: " << totalNodes << "\n";
     cout << "Average no. unique matches: "
-         << totalUniqueMatches / (double)(reads.size()) << endl;
+         << totalUniqueMatches / (double)(nrOfReads) << endl;
     cout << "Total no. unique matches: " << totalUniqueMatches << "\n";
     cout << "Average no. reported matches "
-         << allReportedMatches / (double)(reads.size()) << endl;
+         << allReportedMatches / (double)(nrOfReads) << endl;
     cout << "Total no. reported matches: " << allReportedMatches << "\n";
     cout << "Average no. unique node paths "
-         << totalNodePaths / (double)(reads.size()) << endl;
+         << totalNodePaths / (double)(nrOfReads) << endl;
     cout << "Total no. unique node paths: " << totalNodePaths << "\n";
     cout << "Average no. reported node paths: "
-         << allReportedNodePaths / (double)(reads.size()) << endl;
+         << allReportedNodePaths / (double)(nrOfReads) << endl;
     cout << "Total no. reported node paths: " << allReportedNodePaths << "\n";
     cout << "Mapped reads :" << mappedReads << endl;
     cout << "Median number of unique matches per read "
          << findMedian(numberMatchesPerRead, numberMatchesPerRead.size())
          << endl;
-    cout << "Average no. graph nodes: "
-         << totalDBGNodes / (double)(reads.size()) << endl;
+    cout << "Average no. graph nodes: " << totalDBGNodes / (double)(nrOfReads)
+         << endl;
     cout << "Total no. graph nodes: " << totalDBGNodes << "\n";
 
-    writeToOutputSFI(outputFile, matchesPerRead, reads);
     return elapsed.count();
 }
 
-double doBenchSFR(vector<pair<string, string>>& reads,
-                  FMIndexDBG<FMPosSFR>& index,
+double doBenchSFR(FMIndexDBG<FMPosSFR>& index,
                   SearchStrategyDBG<FMIndexDBG<FMPosSFR>, FMPosSFR>* strategy,
                   string readsFile, length_t ED, string cpSparse,
                   string outputFile) {
@@ -438,18 +514,19 @@ double doBenchSFR(vector<pair<string, string>>& reads,
     StrainFreeMapper mapper(strategy);
 
     if (outputFile == "") {
-        outputFile = readsFile + "_output.txt";
+        outputFile = readsFile + "_output.tsv";
     }
 
     size_t totalNodes = 0;
-    size_t totalMatrixElements = 0;
+    // size_t totalMatrixElements = 0;
     size_t allReportedMatches = 0;
     size_t totalUniqueMatches = 0;
     size_t mappedReads = 0;
-    size_t mappedReadsForward = 0;
-    size_t mappedReadsBackward = 0;
+    // size_t mappedReadsForward = 0;
+    // size_t mappedReadsBackward = 0;
     size_t totalDBGNodes = 0;
-    size_t totalFilterSpecialCases = 0;
+    // size_t totalFilterSpecialCases = 0;
+    chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
     cout << "Strain-free read mapping with " << index.getFilteringOption()
          << " filtering, with " << strategy->getName()
@@ -460,91 +537,131 @@ double doBenchSFR(vector<pair<string, string>>& reads,
          << endl;
     cout.precision(2);
 
-    std::vector<std::vector<FMOccSFR>> matchesPerRead = {};
-    matchesPerRead.reserve(reads.size());
+    size_t chunkSize = 10000;
+    bool firstChunk = true;
+    size_t nrOfReads = 0;
+    string currentLine = "";
+
+    ifstream ifile(readsFile.c_str());
+    ofstream f2;
+    f2.open(outputFile);
+
+    bool readWithN = false;
 
     std::vector<length_t> numberMatchesPerRead;
-    numberMatchesPerRead.reserve(reads.size());
 
-    auto start = chrono::high_resolution_clock::now();
-    for (unsigned int i = 0; i < reads.size(); i += 2) {
+    while (ifile) {
 
-        const auto& p = reads[i];
+        // cout << "Reading in reads from " << readsFile << endl;
+        vector<pair<string, string>> reads;
+        reads.reserve(chunkSize * 2);
+        try {
+            nrOfReads += getReads(reads, readsFile, ifile, chunkSize,
+                                  currentLine, readWithN);
+        } catch (const exception& e) {
+            string er = e.what();
+            er += " Did you provide a valid reads file?";
+            throw runtime_error(er);
+        }
+        auto start = chrono::high_resolution_clock::now();
 
-        auto originalPos = p.first;
-        string read = p.second;
-        string revCompl = reads[i + 1].second;
+        std::vector<std::vector<FMOccSFR>> matchesPerRead = {};
+        matchesPerRead.reserve(reads.size());
 
-        if (((i >> 1) - 1) % (8192 / (1 << ED)) == 0) {
-            cout << "Progress: " << i / 2 << "/" << reads.size() / 2 << "\r";
-            cout.flush();
+        numberMatchesPerRead.reserve(reads.size() +
+                                     numberMatchesPerRead.size());
+
+        for (unsigned int i = 0; i < reads.size(); i += 2) {
+
+            const auto& p = reads[i];
+
+            auto originalPos = p.first;
+            string read = p.second;
+            string revCompl = reads[i + 1].second;
+
+            if ((((i + 2 * nrOfReads - reads.size()) >> 1) - 1) %
+                    (8192 / (1 << ED)) ==
+                0) {
+                cout << "Progress: " << (i + 2 * nrOfReads - reads.size()) / 2
+                     << " reads done.\r";
+                cout.flush();
+            }
+
+            const auto& matches = mapper.matchApproxSFR(read, ED);
+            int nr_of_matches = matches.size();
+
+            totalNodes += index.getNodes();
+            totalDBGNodes += index.getDBGNodes();
+            // totalFilterSpecialCases += index.getFilterSpecialCases();
+            // totalMatrixElements += index.getMatrixElements();
+            allReportedMatches += index.getTotalReported();
+            totalUniqueMatches += nr_of_matches;
+            // mappedReadsForward += !matches.empty();
+
+            // do the same for the reverse complement
+            const auto& matchesRevCompl = mapper.matchApproxSFR(revCompl, ED);
+            int nr_of_matchesRevCompl = matchesRevCompl.size();
+
+            totalNodes += index.getNodes();
+            totalDBGNodes += index.getDBGNodes();
+            // totalFilterSpecialCases += index.getFilterSpecialCases();
+            // totalMatrixElements += index.getMatrixElements();
+            allReportedMatches += index.getTotalReported();
+            totalUniqueMatches += nr_of_matchesRevCompl;
+            // mappedReadsBackward += !matchesRevCompl.empty();
+
+            mappedReads += !(matchesRevCompl.empty() && matches.empty());
+
+            matchesPerRead.push_back(matches);
+            matchesPerRead.push_back(matchesRevCompl);
+            numberMatchesPerRead.push_back(nr_of_matches +
+                                           nr_of_matchesRevCompl);
         }
 
-        std::vector<FMOccSFR> matches = mapper.matchApproxSFR(read, ED);
-        int nr_of_matches = matches.size();
+        auto finish = chrono::high_resolution_clock::now();
+        elapsed += finish - start;
 
-        totalNodes += index.getNodes();
-        totalDBGNodes += index.getDBGNodes();
-        totalFilterSpecialCases += index.getFilterSpecialCases();
-        totalMatrixElements += index.getMatrixElements();
-        allReportedMatches += index.getTotalReported();
-        totalUniqueMatches += nr_of_matches;
-        mappedReadsForward += !matches.empty();
-
-        // do the same for the reverse complement
-        auto matchesRevCompl = mapper.matchApproxSFR(revCompl, ED);
-        int nr_of_matchesRevCompl = matchesRevCompl.size();
-
-        totalNodes += index.getNodes();
-        totalDBGNodes += index.getDBGNodes();
-        totalFilterSpecialCases += index.getFilterSpecialCases();
-        totalMatrixElements += index.getMatrixElements();
-        allReportedMatches += index.getTotalReported();
-        totalUniqueMatches += nr_of_matchesRevCompl;
-        mappedReadsBackward += !matchesRevCompl.empty();
-
-        mappedReads += !(matchesRevCompl.empty() && matches.empty());
-
-        matchesPerRead.push_back(matches);
-        matchesPerRead.push_back(matchesRevCompl);
-        numberMatchesPerRead.push_back(nr_of_matches + nr_of_matchesRevCompl);
+        writeToOutputSFR(outputFile, matchesPerRead, reads, firstChunk, f2);
     }
+
+    if (readWithN) {
+        cout << "Caution, reads containing an N were ignored.\n";
+    }
+
+    f2.close();
 
     if (ED == 0) {
         allReportedMatches = totalUniqueMatches;
     }
 
-    auto finish = chrono::high_resolution_clock::now();
-    chrono::duration<double> elapsed = finish - start;
-    cout << "Progress: " << reads.size() << "/" << reads.size() << "\n";
+    cout << "Progress: " << nrOfReads << "/" << nrOfReads << "\n";
     cout << "Results for " << strategy->getName() << endl;
 
     cout << "Total duration: " << fixed << elapsed.count() << "s\n";
 
-    cout << "Average no. index nodes: " << totalNodes / (double)(reads.size())
+    cout << "Average no. index nodes: " << totalNodes / (double)(nrOfReads)
          << endl;
     cout << "Total no. index nodes: " << totalNodes << "\n";
     cout << "Average no. unique node paths: "
-         << totalUniqueMatches / (double)(reads.size()) << endl;
+         << totalUniqueMatches / (double)(nrOfReads) << endl;
     cout << "Total no. unique node paths: " << totalUniqueMatches << "\n";
     cout << "Average no. reported node paths: "
-         << allReportedMatches / (double)(reads.size()) << endl;
+         << allReportedMatches / (double)(nrOfReads) << endl;
     cout << "Total no. reported node paths: " << allReportedMatches << "\n";
     cout << "Mapped reads :" << mappedReads << endl;
     cout << "Median number of unique node paths per read "
          << findMedian(numberMatchesPerRead, numberMatchesPerRead.size())
          << endl;
-    cout << "Average no. graph nodes: "
-         << totalDBGNodes / (double)(reads.size()) << endl;
+    cout << "Average no. graph nodes: " << totalDBGNodes / (double)(nrOfReads)
+         << endl;
     cout << "Total no. graph nodes: " << totalDBGNodes << "\n";
     // cout << "Total no. special filter cases: " << totalFilterSpecialCases
     //      << "\n";
 
-    writeToOutputSFR(outputFile, matchesPerRead, reads, index);
     return elapsed.count();
 }
 
 template double doBenchSFI<FMIndexDBG<FMPos>, FMPos>(
-    vector<pair<string, string>>& reads, FMIndexDBG<FMPos>& index,
+    FMIndexDBG<FMPos>& index,
     SearchStrategyDBG<FMIndexDBG<FMPos>, FMPos>* strategy, string readsFile,
     length_t ED, string cpSparse, string outputFile);

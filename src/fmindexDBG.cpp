@@ -21,7 +21,9 @@
  ******************************************************************************/
 
 #include "fmindexDBG.h"
-#include "../radixSA64/radix.h"
+#include "divsufsort64.h"
+#include "longestCommonPrefix.h"
+#include "radix.h"
 #include <set>
 #include <sstream>
 
@@ -52,25 +54,28 @@ void FMIndexDBG<positionClass>::createFMIndex(
     // read the text file from disk
     std::cout << "Reading " << baseFN << ".txt..." << std::endl;
 
-    readText(baseFN + ".txt", this->text);
+    // Store the full text in a temporary buffer
+    string buf;
+    readTextOriginal(baseFN, buf);
 
     // Find the length of the original text
-    this->textLength = (this->text[this->text.size() - 1] == '\n')
-                           ? this->text.size() - 1
-                           : this->text.size();
+    textLength = (buf[buf.size() - 1] == '\n') ? buf.size() - 1 : buf.size();
+
+    bool newLine = false;
 
     // Remove return character if necessary
-    if (this->textLength != this->text.size()) {
+    if (textLength != buf.size()) {
+        newLine = true;
         std::cout
             << "WARNING: the input text contained a tailing return, which was "
                "removed."
             << std::endl;
-        this->text = this->text.substr(0, this->textLength);
+        buf = buf.substr(0, textLength);
     }
 
     // count the frequency of each characters in T
     std::vector<length_t> charCounts(256, 0);
-    for (char c : this->text)
+    for (char c : buf)
         charCounts[(unsigned char)c]++;
 
     // count the number of unique characters in T
@@ -79,7 +84,7 @@ void FMIndexDBG<positionClass>::createFMIndex(
         if (count > 0)
             nUniqueChar++;
 
-    std::cout << "\tText has length " << this->textLength << "\n";
+    std::cout << "\tText has length " << textLength << "\n";
     std::cout << "\tText has " << nUniqueChar << " unique characters\n";
 
     if (nUniqueChar > ALPHABET) {
@@ -96,7 +101,12 @@ void FMIndexDBG<positionClass>::createFMIndex(
     }
 
     // Create the alphabet
-    this->sigma = Alphabet<ALPHABET>(charCounts);
+    sigma = Alphabet<ALPHABET>(charCounts);
+
+    text = EncodedText<ALPHABET>(sigma, buf);
+    text.write(baseFN + ".compressed.txt");
+
+    std::cout << "Wrote file " << baseFN << ".compressed.txt\n";
 
     // write the character counts table
     {
@@ -113,148 +123,137 @@ void FMIndexDBG<positionClass>::createFMIndex(
     for (size_t i = 0; i < charCounts.size(); i++) {
         if (charCounts[i] == 0)
             continue;
-        this->counts.push_back(cumCount);
+        counts.push_back(cumCount);
         cumCount += charCounts[i];
     }
 
     // build the SA
-    std::cout << "Generating the suffix array using radixSA64...\n";
+    std::cout << "Generating the suffix array using divsufsort64...\n";
     clock_t startTime = clock();
-    length_t* radixSA =
-        Radix<length_t>((uchar*)&(this->text)[0], this->textLength, 0).build();
-
-    std::vector<length_t> SA(radixSA, radixSA + this->textLength);
-
-    delete[] radixSA;
+    int64_t* SA = (int64_t*)malloc((size_t)textLength * sizeof(int64_t));
+    divsufsort64((uchar*)&(buf)[0], SA, textLength);
     clock_t endTime = clock();
-    float mseconds = clock_diff_to_msec(endTime - startTime);
-    printf("radixSA64 took [%.2fs]\n", mseconds / 1000.0);
+    float milliseconds = clock_diff_to_msec(endTime - startTime);
+    printf("divsufsort64 took [%.2fs]\n", milliseconds / 1000.0);
 
     // perform a sanity check on the suffix array
     std::cout << "\tPerforming sanity checks..." << std::endl;
-    sanityCheck(this->text, SA);
-    std::cout << "\tSanity checks OK" << std::endl;
+    // sanityCheck(text, SA);
+    // std::cout << "\tSanity checks OK" << std::endl;
+
+    buf.clear();
+    buf.resize(0);
+    buf.shrink_to_fit();
 
     // build the BWT
     std::cout << "Generating BWT..." << std::endl;
-    this->bwt = std::string(this->textLength, '\0');
-    for (size_t i = 0; i < SA.size(); i++)
+    bwt.resize(textLength);
+    for (size_t i = 0; i < textLength; i++)
         if (SA[i] > 0)
-            this->bwt[i] = this->text[SA[i] - 1];
+            bwt.set(i, text[SA[i] - 1]);
         else
-            this->bwt[i] = this->text.back();
+            bwt.set(i, text[textLength - 1]);
 
-    std::ofstream ofs(baseFN + ".bwt");
-    ofs.write((char*)this->bwt.data(), this->bwt.size());
-    ofs.close();
-
+    // Write bwt
+    bwt.write(baseFN + ".bwt");
     std::cout << "Wrote file " << baseFN << ".bwt\n";
+
+    // create succinct BWT bitvector table
+    fwdRepr = BWTRepr<ALPHABET>(sigma, bwt);
+    fwdRepr.write(baseFN + ".brt");
+    std::cout << "Wrote file: " << baseFN << ".brt" << std::endl;
+
+    // Count the number of strains
+    numberOfStrains = fwdRepr.occ(sigma.c2i('%'), textLength) + 1;
+    bwt.clear();
+    fwdRepr.clear();
 
     // create sparse suffix arrays
     for (int saSF : sparse_sa) {
-        this->sparseSA = SparseSuffixArray(SA, saSF);
-        this->sparseSA.write(baseFN);
+        sparseSA.clear();
+        sparseSA = SparseSuffixArray(SA, saSF, textLength);
+        sparseSA.write(baseFN);
         std::cout << "Wrote sparse suffix array with factor " << saSF
                   << std::endl;
     }
-    SA.clear();
+    delete[] SA;
 
-    // create succint BWT bitstd::vector table
-    this->fwdRepr = BWTRepr<ALPHABET>(this->sigma, this->bwt);
-    this->fwdRepr.write(baseFN + ".brt");
-    std::cout << "Wrote file: " << baseFN << ".brt" << std::endl;
+    sparseSA.clear();
 
     // Reverse the original text
     std::cout << "Reversing the original text...\n";
     startTime = clock();
-    std::string reverseText = this->text;
-    reverse(reverseText.begin(), reverseText.end());
+
+    readTextOriginal(baseFN, buf);
+
+    if (newLine) {
+        buf.pop_back();
+    }
+
+    reverse(buf.begin(), buf.end());
     endTime = clock();
-    mseconds = clock_diff_to_msec(endTime - startTime);
-    printf("Reversing took [%.2fs]\n", mseconds / 1000.0);
+    milliseconds = clock_diff_to_msec(endTime - startTime);
+    printf("Reversing took [%.2fs]\n", milliseconds / 1000.0);
 
     // build the reverse SA
-    std::cout << "Generating the reverse suffix array using radixSA64...\n";
+    std::cout << "Generating the reverse suffix array using divsufsort64...\n";
     startTime = clock();
-    length_t* radixRevSA =
-        Radix<length_t>((uchar*)&(reverseText)[0], this->textLength, 0).build();
-
-    std::vector<length_t> revSA(radixRevSA, radixRevSA + this->textLength);
-
-    delete[] radixRevSA;
+    int64_t* revSA = (int64_t*)malloc((size_t)textLength * sizeof(int64_t));
+    divsufsort64((uchar*)&(buf)[0], revSA, textLength);
     endTime = clock();
-    mseconds = clock_diff_to_msec(endTime - startTime);
-    printf("radixSA64 took [%.2fs]\n", mseconds / 1000.0);
+    milliseconds = clock_diff_to_msec(endTime - startTime);
+    printf("divsufsort64 took [%.2fs]\n", milliseconds / 1000.0);
 
-    reverseText.clear();
+    buf.clear();
+    buf.resize(0);
+    buf.shrink_to_fit();
 
     // perform a sanity check on the suffix array
     std::cout << "\tPerforming sanity checks..." << std::endl;
-    sanityCheck(this->text, revSA);
-    std::cout << "\tSanity checks OK" << std::endl;
+    // sanityCheck(text, revSA);
+    // std::cout << "\tSanity checks OK" << std::endl;
 
     // build the reverse BWT
     std::cout << "Generating reverse BWT..." << std::endl;
-    this->revbwt = std::string(this->textLength, '\0');
-    this->revbwt.resize(this->textLength);
-    for (size_t i = 0; i < revSA.size(); i++)
+    revbwt.resize(textLength);
+    for (size_t i = 0; i < textLength; i++)
         if (revSA[i] > 0)
-            this->revbwt[i] = this->text[this->textLength - revSA[i]];
+            revbwt.set(i, text[textLength - revSA[i]]);
         else
-            this->revbwt[i] = this->text.front();
+            revbwt.set(i, text[0]);
 
-    std::ofstream ofsrev(baseFN + ".rev.bwt");
-    ofsrev.write((char*)this->revbwt.data(), this->revbwt.size());
-    ofsrev.close();
+    // Encode reverse bwt
+    revbwt.write(baseFN + ".rev.bwt");
+    delete[] revSA;
 
     std::cout << "Wrote file " << baseFN << ".rev.bwt\n";
 
-    // create sparse suffix array
-    int saSF = sparse_sa.back();
-    this->sparseRevSA = SparseSuffixArray(revSA, saSF);
-    revSA.clear();
-
-    // create succint reverse BWT bitstd::vector table
-    this->revRepr = BWTRepr<ALPHABET>(this->sigma, this->revbwt);
-    this->revRepr.write(baseFN + ".rev.brt");
+    // create succinct reverse BWT bitvector table
+    revRepr = BWTRepr<ALPHABET>(sigma, revbwt);
+    revRepr.write(baseFN + ".rev.brt");
     std::cout << "Wrote file: " << baseFN << ".rev.brt" << std::endl;
 
-    // populate table
-    this->populateTable(true);
+    revbwt.clear();
+    revRepr.clear();
+    text.clear();
 }
 
 template <class positionClass>
-length_t FMIndexDBG<positionClass>::findRevSA(length_t index) const {
-
-    if (sparseRevSA.getSparsenessFactor() == 0) {
-        // The sparse reverse SA is not present in memory
-        throw runtime_error("Reverse suffix array is not available.");
-    }
-
-    // Iterate until a position is reached for which the entry is stored
-    length_t l = 0;
-    while (!sparseRevSA[index]) {
-        index = this->findLF(index, true);
-        l++;
-    }
-    return sparseRevSA.get(index) + l;
-}
-
-template <class positionClass>
-void FMIndexDBG<positionClass>::computeLCP(Bitvec2& LCP, bool progress) {
+void FMIndexDBG<positionClass>::computeLCPKasai(Bitvec2& LCP, bool progress,
+                                                uint& k) {
     std::cout << "Computing the LCP..." << std::endl;
     // Initialize the LCP array with one more element than the length of the
     // original text
-    LCP = (this->textLength + 1);
+    LCP = (textLength + 1);
     // Create a rank array, which will contain the inverse of the suffix array
-    std::vector<length_t> rank(this->textLength);
+    std::vector<length_t> rank(textLength);
     // Fill in the rank array
-    for (length_t i = 0; i < this->textLength; i++) {
-        rank[this->findSA(i)] = i;
+    for (length_t i = 0; i < textLength; i++) {
+        rank[findSA(i)] = i;
         if (progress) {
-            if (i % (this->textLength / 100) == 0) {
-                std::cout << "Progress part 1/5: "
-                          << i / (this->textLength / 100) << "%"
+            if (i % (textLength / 100) == 0) {
+                std::cout << "Progress part 1/5: " << i / (textLength / 100)
+                          << "%"
                           << "\r";
                 std::cout.flush();
             }
@@ -267,17 +266,17 @@ void FMIndexDBG<positionClass>::computeLCP(Bitvec2& LCP, bool progress) {
     uint h = 0;
     // Fill in the LCP array by iterating over all suffixes in sorted order
     // (this is the order in the suffix array)
-    for (length_t i = 0; i < this->textLength; i++) {
+    for (length_t i = 0; i < textLength; i++) {
         // Verify that the suffix starting at index i is not the
         // lexicographically smallest suffix. In practice, the lexicographically
-        // smalles suffix is "$", so this one is skipped.
+        // smallest suffix is "$", so this one is skipped.
         if (rank[i] > 0) {
             // The suffix starting at index j is successor of the suffix
             // starting at index i in the suffix array.
-            length_t j = this->findSA(rank[i] - 1);
-            // Increment h until it represents the length of the longets common
+            length_t j = findSA(rank[i] - 1);
+            // Increment h until it represents the length of the longest common
             // prefix between the two suffixes
-            while (this->text[i + h] == this->text[j + h]) {
+            while (text[i + h] == text[j + h]) {
                 h++;
             }
             // Update the compacted LCP array.
@@ -296,9 +295,9 @@ void FMIndexDBG<positionClass>::computeLCP(Bitvec2& LCP, bool progress) {
         }
         // Print progress
         if (progress) {
-            if (i % (this->textLength / 100) == 0) {
-                std::cout << "Progress part 2/5: "
-                          << i / (this->textLength / 100) << "%"
+            if (i % (textLength / 100) == 0) {
+                std::cout << "Progress part 2/5: " << i / (textLength / 100)
+                          << "%"
                           << "\r";
                 std::cout.flush();
             }
@@ -319,16 +318,16 @@ template <class positionClass>
 void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
                                                   Bitvec& Br_right,
                                                   Bitvec& Bl_right,
-                                                  bool progress) {
+                                                  bool progress, uint& k) {
     //  Build the longest common prefix array
     Bitvec2 LCP;
-    computeLCP(LCP, progress);
+    computeLCPPrezza(this, LCP, progress, k);
 
     // Build the bit vectors
     std::cout << "Computing Br_right and Bl_right..." << std::endl;
 
     // Initialize all values to false
-    for (length_t i = 0; i < this->textLength; i++) {
+    for (length_t i = 0; i < textLength; i++) {
         Br_right[i] = false;
         Bl_right[i] = false;
     }
@@ -341,7 +340,7 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
         length_t index = i;
         end_values.insert(index);
         for (uint j = 1; j < k; j++) {
-            index = this->findLF(index, false);
+            index = findLF(index, false);
             end_values.insert(index);
         }
     }
@@ -349,9 +348,9 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
     length_t lb = 0;
     // kIndex stores the last index for which the LCP value is equal to k
     length_t kIndex = 0;
-    // lastdiff stores the last index at which the characters BWT[lastdiff-1]
-    // and BWT[lastdiff] differ
-    length_t lastdiff = 0;
+    // lastDiff stores the last index at which the characters BWT[lastDiff-1]
+    // and BWT[lastDiff] differ
+    length_t lastDiff = 0;
     // if open is true, we are in an area for which the LCP values are larger
     // than k
     bool open = false;
@@ -359,14 +358,14 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
     int counter = 0;
     // create a copy of the cumulative counts array corresponding to the
     // bidirectional FM-index
-    std::vector<length_t> counts_copy = this->counts;
+    std::vector<length_t> counts_copy = counts;
     // Iterate over all entries in the LCP array
-    for (length_t i = 1; i < this->textLength + 1; i++) {
+    for (length_t i = 1; i < textLength + 1; i++) {
         // the counts array is adjusted every iteration so that it would contain
         // the following information: counts[BWT[j]] =LF(j)+1, where j is the
         // index of the last occurrence of character BWT[j] in BWT before the
         // current index i of the algorithm
-        counts_copy[this->sigma.c2i(this->bwt[i - 1])]++;
+        counts_copy[bwt[i - 1]]++;
 
         if (LCP[i] >= 1) {
             // We enter a range with LCP entries bigger than or equal to k
@@ -377,7 +376,7 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
             }
         } else {
             if (open) {
-                // We are leaving a k-mer range that must be analysed
+                // We are leaving a k-mer range that must be analyzed
 
                 // Check if the k-mer is right-maximal
                 if (kIndex > lb) {
@@ -398,11 +397,11 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
                         Br_right[i - 1] = true;
                         // We get the range in the reverse SA that corresponds
                         // to this k-mer
-                        Range reverseRange = getReverseRange(lb, false);
+                        Range reverseRange = getReverseRangeKMer(lb, false, k);
                         length_t lb_rev = reverseRange.getBegin();
                         // Add the new node to the graph
                         G.emplace_back(k, i - lb, lb, lb, lb_rev, lb_rev);
-                        // Push the node identifier to the queu
+                        // Push the node identifier to the queue
                         Q.push(counter);
                         // Increment the node ID creator
                         counter++;
@@ -410,21 +409,22 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
                 }
                 // check whether the k-mer corresponding to the current interval
                 // is a left-maximal repeat by checking if the last index
-                // lastdiff at which the characters BWT[lastdiff-1] and
-                // BWT[lastdiff] differ, is higher than the left boundary (lb)
+                // lastDiff at which the characters BWT[lastDiff-1] and
+                // BWT[lastDiff] differ, is higher than the left boundary (lb)
                 // of the SA interval
-                if (lastdiff > lb) {
+                if (lastDiff > lb) {
                     // Iterate over all characters in the BWT corresponding to
                     // this left-maximal k-mer interval
                     for (length_t j = lb; j < i; j++) {
                         // Get the corresponding character
-                        char c = this->bwt[j];
+
+                        char c = sigma.i2c(bwt[j]);
                         // Check if the preceding character is a separation
                         // character, which means we are situated in a start
                         // node
                         if (c != '$' && c != '%') {
                             // This is not a start node
-                            int cIdx = this->sigma.c2i(c);
+                            int cIdx = sigma.c2i(c);
                             // the counts array can directly be used to find the
                             // right boundary of the closed SA interval of the
                             // preceding k-mer, which needs to be set to true in
@@ -446,16 +446,16 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
             // update the last index for which the LCP value is lower then k
             lb = i;
         }
-        if (this->bwt[i] != this->bwt[i - 1]) {
-            // the last index at which the characters BWT[lastdiff-1] and
-            // BWT[lastdiff] differ
-            lastdiff = i;
+        if (bwt[i] != bwt[i - 1]) {
+            // the last index at which the characters BWT[lastDiff-1] and
+            // BWT[lastDiff] differ
+            lastDiff = i;
         }
         // Print progress
         if (progress) {
-            if (i % (this->textLength / 100) == 0) {
-                std::cout << "Progress part 3/5: "
-                          << i / (this->textLength / 100) << "%"
+            if (i % (textLength / 100) == 0) {
+                std::cout << "Progress part 1/3: " << i / (textLength / 100)
+                          << "%"
                           << "\r";
                 std::cout.flush();
             }
@@ -463,13 +463,13 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
     }
     // Print progress
     if (progress) {
-        std::cout << "Progress part 3/5: " << 100 << "%"
+        std::cout << "Progress part 1/3: " << 100 << "%"
                   << "\n";
     }
     open = false;
     // the one-bits in Bl_right that also correspond to a right-maximal k-mer
     // must be reset to zero
-    for (length_t i = 0; i < this->textLength; i++) {
+    for (length_t i = 0; i < textLength; i++) {
         if (open) {
             // We are in a right-maximal k-mer interval
             Bl_right[i] = false;
@@ -484,9 +484,9 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
         }
         // Print progress
         if (progress) {
-            if (i % (this->textLength / 100) == 0) {
-                std::cout << "Progress part 4/5: "
-                          << i / (this->textLength / 100) << "%"
+            if (i % (textLength / 100) == 0) {
+                std::cout << "Progress part 2/3: " << i / (textLength / 100)
+                          << "%"
                           << "\r";
                 std::cout.flush();
             }
@@ -499,7 +499,7 @@ void FMIndexDBG<positionClass>::computeBitVectors(std::queue<int>& Q,
 
     // Print progress
     if (progress) {
-        std::cout << "Progress part 4/5: " << 100 << "%"
+        std::cout << "Progress part 2/3: " << 100 << "%"
                   << "\n";
     }
 
@@ -515,29 +515,29 @@ std::vector<std::pair<char, Range>>
 FMIndexDBG<positionClass>::getIntervals(length_t i, length_t j) {
 
     std::vector<std::pair<char, Range>> result;
-    result.reserve(this->sigma.size());
+    result.reserve(sigma.size());
     // Iterate over all characters
-    for (length_t k = 0; k < this->sigma.size(); k++) {
+    for (length_t k = 0; k < sigma.size(); k++) {
         SARangePair child = SARangePair(Range(i, j), Range(0, 0));
         // Find the range over the SA after appending the extra character to the
         // front of the current suffix
-        if (this->findRangesWithExtraCharBackward(
+        if (findRangesWithExtraCharBackward(
                 k, SARangePair(Range(i, j), Range(0, 0)), child)) {
-            result.emplace_back(this->sigma.i2c(k), child.getRangeSA());
+            result.emplace_back(sigma.i2c(k), child.getRangeSA());
         }
     }
     return result;
 }
 
 template <class positionClass>
-Range FMIndexDBG<positionClass>::getReverseRange(length_t indexInSA,
-                                                 bool isEndNode) {
+Range FMIndexDBG<positionClass>::getReverseRangeKMer(length_t indexInSA,
+                                                     bool isEndNode, uint& k) {
     // Find the index of the substring of interest in the original text
-    length_t indexInText = this->findSA(indexInSA);
+    length_t indexInText = findSA(indexInSA);
     // Get the substring of interest: the first k-mer of the suffix at the
     // indexInSA'th position in the SA. Match this k-mer to the reference
-    SARangePair p = this->matchStringBidirectionally(
-        Substring(&this->text, indexInText, (indexInText + k)));
+    SARangePair p = matchStringBidirectionally(Substring(
+        (text.decodeSubstring(sigma, indexInText, (indexInText + k)))));
     // If the node is not an end node, all computations are done
     if (!isEndNode) {
         // Return the reverse SA range
@@ -547,20 +547,20 @@ Range FMIndexDBG<positionClass>::getReverseRange(length_t indexInSA,
     // corresponding substring. Hence, we need to distinguish between these as
     // well. Following variable keeps track of the number of extra characters we
     // use to distinguish the nodes.
-    length_t extra = k;
+    length_t extra = textLength / 100 + k;
     // Keep adding sets of characters until the match is unique or the start of
     // the reference was reached
     while (p.width() > 1 && extra <= indexInText) {
         // Exactly match the substring with extra characters
-        p = this->matchStringBidirectionally(
-            Substring(&this->text, indexInText - extra, indexInText + k));
-        extra += k;
+        p = matchStringBidirectionally(Substring(
+            text.decodeSubstring(sigma, indexInText - extra, indexInText + k)));
+        extra += textLength / 100 + k;
     }
     // If too much characters were added in the last set, match again until the
     // start of the reference
     if (extra > indexInText) {
-        p = this->matchStringBidirectionally(
-            Substring(&this->text, 0, indexInText + k));
+        p = matchStringBidirectionally(
+            Substring(text.decodeSubstring(sigma, 0, indexInText + k)));
     }
     // Return the first entry of the found reverse SA range. We don't return the
     // complete reverse SA range because it could contain more than one entry if
@@ -570,45 +570,10 @@ Range FMIndexDBG<positionClass>::getReverseRange(length_t indexInSA,
 }
 
 template <class positionClass>
-void FMIndexDBG<positionClass>::setEdgeMapping(length_t id) {
-    Node node = G[id];
-    // If only one edge goes through the node, nothing needs to be done
-    if (node.multiplicity > 1) {
-        // Create a std::vector of pairs of edges, defined by their index in the
-        // original text, along with their original rank in the SA
-        std::vector<pair<length_t, int>> strains_forward;
-        for (size_t i = 0; i < node.multiplicity; i++) {
-            strains_forward.emplace_back(
-                this->findSA(node.left_kmer_forward + i), i);
-        }
-        // Sort the std::vector based on the indexes of the edges in the
-        // original text
-        sort(strains_forward.begin(), strains_forward.end());
-        // Create a std::vector of pairs of edges, defined by their index in the
-        // original text, along with their original rank in the reverse SA
-        std::vector<pair<length_t, int>> strains_reverse;
-        for (size_t i = 0; i < node.multiplicity; i++) {
-            strains_reverse.emplace_back(
-                this->textLength - findRevSA(node.left_kmer_reverse + i), i);
-        }
-        // Sort the std::vector based on the indexes of the edges in the
-        // original text
-        sort(strains_reverse.begin(), strains_reverse.end());
-        // Create the edge mapping based on the two sorted std::vectors. The
-        // mapping maps from regular to reverse.
-        for (size_t i = 0; i < node.multiplicity; i++) {
-            G[id].edgeMapping[strains_forward[i].second] =
-                strains_reverse[i].second;
-        }
-    }
-}
-
-template <class positionClass>
 void FMIndexDBG<positionClass>::buildCompressedGraph(
     const std::vector<int>& checkpoint_sparseness, bool progress,
-    std::vector<RankSelectInterface>& B_rights,
-    std::vector<RankInterface>& B_right_fulls,
-    std::vector<std::vector<MappingPair>>& mapping_rights) {
+    std::vector<RankInterface>& B_rights,
+    std::vector<std::vector<MappingPair>>& mapping_rights, uint& k) {
     std::cout << "Start building the implicit graph:" << std::endl;
 
     // Counter for progress printing
@@ -616,41 +581,41 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
     // Initialize the Br_right and Bl_right bit vectors to the length of the
     // text + 1. This way, rank(textLength) can be called as well. These are
     // temporary bit vectors for the build process.
-    Bitvec Br_right = (this->textLength + 1);
-    Bitvec Bl_right = (this->textLength + 1);
+    Bitvec Br_right = (textLength + 1);
+    Bitvec Bl_right = (textLength + 1);
 
     const int cp_len = checkpoint_sparseness.size();
 
-    // Set the start values of B_right, B_left and B_right_full to 0. These are
+    // Set the start values of B_right and B_left to 0. These are
     // the bit vectors that will be stored.
-    for (length_t i = 0; i < this->textLength; i++) {
+    for (length_t i = 0; i < textLength; i++) {
         B_right[i] = false;
         B_left[i] = false;
-        B_right_full[i] = false;
         for (int j = 0; j < cp_len; j++) {
             B_rights[j][i] = false;
-            B_right_fulls[j][i] = false;
         }
     }
     // queue Q stores which nodes still need to be handled by the construction
     // algorithm
     std::queue<int> Q;
-    // Store a temportary mapping of node IDs with index of the leftmost k-mer
+    // Store a temporary mapping of node IDs with index of the leftmost k-mer
     // in the reverse SA
     std::vector<pair<length_t, int>> temporary_mapping_left;
-    // Store temportary mappings of node IDs and offsets with index of the
+    // Store temporary mappings of node IDs and offsets with index of the
     // corresponding k-mer in the SA
     std::vector<std::vector<std::pair<length_t, MappingPair>>>
         temporary_mapping_rights(checkpoint_sparseness.size());
 
-    // Compute remporary bit vectors Br_right and Bl_right
-    computeBitVectors(Q, Br_right, Bl_right, progress);
+    // Compute temporary bit vectors Br_right and Bl_right
+    computeBitVectors(Q, Br_right, Bl_right, progress, k);
 
     // Number of right-maximal nodes
-    int rightMax = Br_right.rank(this->textLength) / 2;
+    int rightMax = Br_right.rank(textLength) / 2;
     // Number of nodes that are not right-maximal and precede a left-maximal
     // node
-    int leftMax = Bl_right.rank(this->textLength);
+    int leftMax = Bl_right.rank(textLength);
+
+    G.reserve(rightMax + leftMax + numberOfStrains);
 
     std::cout << "Constructing the compressed graph..." << std::endl;
 
@@ -663,7 +628,7 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
     // Add the end nodes (they can still be extended later)
     for (length_t s = 0; s < numberOfStrains; s++) {
         int id = rightMax + leftMax + s;
-        Range reverseRange = getReverseRange(s, true);
+        Range reverseRange = getReverseRangeKMer(s, true, k);
         G.emplace_back(1, 1, s, s, reverseRange.getBegin(), 0);
         Q.push(id);
         Bl_right[s] = 0;
@@ -672,7 +637,7 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
     // Find the number of graph nodes
     numberOfGraphNodes = G.size();
     // Forward matching
-    this->setDirection(FORWARD);
+    setDirection(FORWARD);
 
     // Keep iterating over the queue until all nodes are handled
     while (!Q.empty()) {
@@ -742,15 +707,6 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
                                                 node.left_kmer_forward +
                                                     node.multiplicity - 1,
                                                 MappingPair(id, node.len - k));
-
-                                        // Set the correct bits in B_right_full
-                                        for (size_t i = 0;
-                                             i < node.multiplicity; i++) {
-                                            B_right_fulls
-                                                [j]
-                                                [node.left_kmer_forward + i] =
-                                                    true;
-                                        }
                                     }
                                 }
                             }
@@ -763,8 +719,8 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
                             // The predecessor of this node needs to be
                             // initialized
                             int newID = rightMax + Bl_right.rank(i);
-                            Range reverseRange =
-                                getReverseRange(i, newID >= rightMax + leftMax);
+                            Range reverseRange = getReverseRangeKMer(
+                                i, newID >= rightMax + leftMax, k);
                             G[newID] =
                                 Node(k, j - i, i, i, reverseRange.getBegin(),
                                      reverseRange.getBegin());
@@ -778,8 +734,8 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
         // If the node was extended or the node is an end node, index of the
         // leftmost k-mer in the reverse suffix array must be updated.
         if (node.len > k || id >= rightMax + leftMax) {
-            Range reverseRange = getReverseRange(node.left_kmer_forward,
-                                                 id >= rightMax + leftMax);
+            Range reverseRange = getReverseRangeKMer(
+                node.left_kmer_forward, id >= rightMax + leftMax, k);
             node.left_kmer_reverse = reverseRange.getBegin();
         }
 
@@ -796,23 +752,29 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
             // Update the temporary right mapping
             temporary_mapping_rights[j].emplace_back(indexForBit,
                                                      MappingPair(id, 0));
+        }
 
-            // Set the correct bits in B_right_full corresponding to this node
-            for (size_t i = 0; i < node.multiplicity; i++) {
-                B_right_fulls[j][node.right_kmer_forward + i] = true;
+        if (node.len > k) {
+            // Set the correct bit in B_right corresponding to this node
+            indexForBit = node.left_kmer_forward + node.multiplicity - 1;
+            for (int j = 0; j < cp_len; j++) {
+
+                if ((node.len - k) % checkpoint_sparseness[j] > 0) {
+                    B_rights[j][indexForBit] = true;
+                    // Update the temporary right mapping
+                    temporary_mapping_rights[j].emplace_back(
+                        indexForBit, MappingPair(id, node.len - k));
+                }
             }
         }
 
         // Update the node attributes in the graph
         G[id] = node;
 
-        // Set the edge mapping of the node
-        setEdgeMapping(id);
-
         // Print progress
-        if (progress) {
+        if (progress && numberOfGraphNodes > 100) {
             if (counter % (numberOfGraphNodes / 100) == 0) {
-                std::cout << "Progress part 5/5: "
+                std::cout << "Progress part 3/3: "
                           << counter / (numberOfGraphNodes / 100) << "%"
                           << "\r";
                 std::cout.flush();
@@ -822,7 +784,7 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
     }
     // Print progress
     if (progress) {
-        std::cout << "Progress part 5/5: " << 100 << "%"
+        std::cout << "Progress part 3/3: " << 100 << "%"
                   << "\n";
     }
 
@@ -831,19 +793,18 @@ void FMIndexDBG<positionClass>::buildCompressedGraph(
     B_left.indexInterface();
     for (int j = 0; j < cp_len; j++) {
         B_rights[j].indexInterface();
-        B_right_fulls[j].indexInterface();
     }
 
     // Sanity check
     if (size_t(rightMax + leftMax + numberOfStrains) !=
-        B_left.rank(this->textLength)) {
+        B_left.rank(textLength)) {
         std::cout << "Warning: node count is incorrect." << std::endl;
     }
 
     // // Debugging
-    // for (length_t i = 0; i < this->textLength; i++) {
-    //     std::cout << i << " B_right " << B_right[i] << " B_right_full " <<
-    //     B_right_full[i] << std::endl;
+    // for (length_t i = 0; i < textLength; i++) {
+    //     std::cout << i << " B_right " << B_rights[0][i] << " B_left "
+    //               << B_left[i] << std::endl;
     // }
 
     // Sanity check
@@ -885,12 +846,14 @@ length_t FMIndexDBG<positionClass>::getFilterSpecialCases() const {
 }
 
 template <class positionClass> void FMIndexDBG<positionClass>::resetCounters() {
-    this->nodeCounter = 0;
-    this->matrixElementCounter = 0;
-    this->positionsInPostProcessingCounter = 0;
-    this->redundantNodePathsCounter = 0;
+    nodeCounter = 0;
+    matrixElementCounter = 0;
+    positionsInPostProcessingCounter = 0;
+    redundantNodePathsCounter = 0;
     nodeDBGCounter = 0;
     filterSpecialCaseCounter = 0;
+    elapsedNodePaths = std::chrono::duration<double>::zero();
+    elapsedSAtoText = std::chrono::duration<double>::zero();
 }
 
 template <class positionClass>
@@ -912,124 +875,26 @@ int FMIndexDBG<positionClass>::findIDFirst(length_t i) const {
 }
 
 template <class positionClass>
-void FMIndexDBG<positionClass>::findID(length_t i, uint32_t& id,
+void FMIndexDBG<positionClass>::findID(length_t j, uint32_t& id,
                                        uint32_t& l) const {
     nodeDBGCounter++;
-    bool id_found = false;
+    j--;
     l = 0;
     // The offset of the checkpoint in the node
     uint32_t l_offset, id_right;
     // Move to the left until an identifier is found
-    while (!id_found) {
-        if (B_right_full[i] == 1) {
-            // Find the number of ones up to i in B_right
-            id_right = B_right.rank(i);
-            // Retrieve the correct node ID using the node mapping
-            id = mapping_right[id_right].id;
-            id_found = true;
-            // Retrieve the offset of the checkpoint in the node
-            l_offset = mapping_right[id_right].distanceFromRightEnd;
-        } else {
-            // Shift the k-length window one character to the left
-            i = this->findLF(i, false);
-            l++;
-        }
+    while (B_right[j] == 0) {
+        // Shift the k-length window one character to the left
+        j = findLF(j, false);
+        l++;
     }
-    if (l_offset != 0) {
-        // A checkpoint that is not at the end of the node was used to identify
-        // the k-mer
-        l = G[id].len - k - l_offset + l;
-        return;
-    }
-
-    if (l == 0) {
-        // The input k-mer already was the rightmost k-mer of the node
-        l = G[id].len - k;
-        return;
-    }
-
-    // TODO: benchmark the two options below
-    // TODO: is there a good option using BWT?
-
-    // Find the rank in the SA of the edge through which we entered the
-    // predecessor
-    uint32_t offset = i - G[id].right_kmer_forward;
-    // Convert to a rank in the reverse SA
-    uint32_t offset_reverse = G[id].edgeMapping[offset];
-    // Jump to the successor
-    id = jumpToSuccessorThroughEdge(id, offset_reverse);
-
-    // // Alternative using suffix array:
-    // // But: the text is used here, which shouldn't be done
-    // char c = this->text[findSA(i)+k];
-    // jumpToSuccessorWithChar(id, id, this->sigma.c2i(c));
-
-    // Decrement l because jumped one character to the right when moving to the
-    // successor
-    l--;
-    return;
-}
-
-template <class positionClass>
-void FMIndexDBG<positionClass>::findIDandOffset(
-    length_t i, uint32_t& id, uint32_t& l, uint32_t& offset_reverse) const {
-    nodeDBGCounter++;
-    bool id_found = false;
-    l = 0;
-    // The offset of the checkpoint in the node
-    uint32_t l_offset, id_right;
-    // Move to the left until an identifier is found
-    while (!id_found) {
-        if (B_right_full[i] == 1) {
-            // Find the number of ones up to i in B_right
-            id_right = B_right.rank(i);
-            // Retrieve the correct node ID using the node mapping
-            id = mapping_right[id_right].id;
-            id_found = true;
-            // Retrieve the offset of the checkpoint in the node
-            l_offset = mapping_right[id_right].distanceFromRightEnd;
-        } else {
-            // Shift the k-length window one character to the left
-            i = this->findLF(i, false);
-            l++;
-        }
-    }
-    if (l_offset != 0) {
-        // A checkpoint that is not at the end of the node was used to identify
-        // the k-mer
-        l = G[id].len - k - l_offset + l;
-        // Find the regular offset of this edge in SA using rank and select
-        // operations
-        // B_right.rank(i) or id_right can never be 0, since the
-        // character $ cannot appear in the middle of a node.
-        uint32_t offset = B_right_full.rank(i) -
-                          B_right_full.rank(B_right.select(id_right - 1) + 1);
-        // Convert to a rank in the reverse SA
-        offset_reverse = G[id].edgeMapping[offset];
-        return;
-    }
-
-    if (l == 0) {
-        // The input k-mer already was the rightmost k-mer of the node
-        l = G[id].len - k;
-        // Find the rank in the SA of the edge through which we entered the
-        // predecessor
-        uint32_t offset = i - G[id].right_kmer_forward;
-        // Convert to a rank in the reverse SA
-        offset_reverse = G[id].edgeMapping[offset];
-        return;
-    }
-
-    // Find the rank in the SA of the edge through which we entered the
-    // predecessor
-    uint32_t offset = i - G[id].right_kmer_forward;
-    // Convert to a rank in the reverse SA
-    offset_reverse = G[id].edgeMapping[offset];
-    // Jump to the successor
-    id = jumpToSuccessorThroughEdge(id, offset_reverse);
-    // Decrement l because jumped one character to the right when moving to the
-    // successor
-    l--;
+    // Find the number of ones up to i in B_right
+    id_right = B_right.rank(j);
+    // Retrieve the correct node ID using the node mapping
+    id = mapping_right[id_right].id;
+    // Retrieve the offset of the checkpoint in the node
+    l_offset = mapping_right[id_right].distanceFromRightEnd;
+    l = G[id].len - k_DBG - l_offset + l;
     return;
 }
 
@@ -1038,7 +903,7 @@ int FMIndexDBG<positionClass>::jumpToSuccessorThroughEdge(
     uint32_t id, uint32_t& offset_reverse) const {
     // Move one step to the right
     length_t left_kmer_reverse =
-        this->findLF(G[id].right_kmer_reverse + offset_reverse, true);
+        findLF(G[id].right_kmer_reverse + offset_reverse, true);
     // Find the ID of the successor
     id = findIDFirst(left_kmer_reverse);
     // Find the new reverse offset
@@ -1051,7 +916,7 @@ int FMIndexDBG<positionClass>::jumpToPredecessorThroughEdge(
     uint32_t id, uint32_t& offset) const {
     // Move one step to the right
     length_t right_kmer_forward =
-        this->findLF(G[id].left_kmer_forward + offset, false);
+        findLF(G[id].left_kmer_forward + offset, false);
     // Find the ID of the successor
     id = findIDLast(right_kmer_forward);
     // Find the new offset
@@ -1072,7 +937,7 @@ bool FMIndexDBG<positionClass>::jumpToSuccessorWithChar(
                         node.right_kmer_reverse + node.multiplicity));
     // Append the next character to the substring and find the corresponding
     // range pair
-    if (!this->findRangesWithExtraCharForward(posInAlphabet, p, p)) {
+    if (!findRangesWithExtraCharForward(posInAlphabet, p, p)) {
         // No successor was found
         return false;
     }
@@ -1080,7 +945,6 @@ bool FMIndexDBG<positionClass>::jumpToSuccessorWithChar(
     // that the offset is not larger than the number of such end nodes that can
     // be accessed.
 
-    // TODO: why is reverse offset a signed int?
     if (reverse_offset >= p.width()) {
         // No extra successor was found
         return false;
@@ -1103,7 +967,7 @@ bool FMIndexDBG<positionClass>::jumpToPredecessorWithChar(
                         node.right_kmer_reverse + node.multiplicity));
     // Prepend the next character to the substring and find the corresponding
     // range pair
-    if (!this->findRangesWithExtraCharBackward(posInAlphabet, p, p)) {
+    if (!findRangesWithExtraCharBackward(posInAlphabet, p, p)) {
         // No predecessor was found
         return false;
     }
@@ -1116,11 +980,9 @@ template <class positionClass>
 std::vector<TextOccurrenceSFI>
 FMIndexDBG<positionClass>::convertToMatchesInTextSFI(
     const FMOccSFI<positionClass>& saMatch) {
-    if (saMatch.getNodePath().empty()) {
-        return std::vector<TextOccurrenceSFI>{};
-    }
 
     return convertToMatchesInTextSFI(saMatch.getRanges(), saMatch.getNodePath(),
+                                     saMatch.getDistanceFromLeftEnd(),
                                      saMatch.getDepth(), saMatch.getDistance(),
                                      saMatch.getShift());
 }
@@ -1129,22 +991,23 @@ template <class positionClass>
 std::vector<TextOccurrenceSFI>
 FMIndexDBG<positionClass>::convertToMatchesInTextSFI(
     const SARangePair& ranges, const std::vector<uint32_t>& nodepath,
-    const int& patternLength, const int& distance, const length_t& shift) {
+    const uint32_t& distanceFromLeftEnd, const int& patternLength,
+    const int& distance, const length_t& shift) {
     std::vector<TextOccurrenceSFI> textMatches;
     textMatches.reserve(ranges.width());
 
     for (length_t i = ranges.getRangeSA().getBegin();
          i < ranges.getRangeSA().getEnd(); i++) {
         // find the startPosition in the text by looking at the SA
-        length_t startPos = this->findSA(i) + shift;
+        length_t startPos = findSA(i) + shift;
 
         // cap startPos at textLength
-        startPos = startPos % this->textLength;
+        startPos = startPos % textLength;
 
         length_t endPos = startPos + patternLength;
 
         textMatches.emplace_back(Range(startPos, endPos), distance, nodepath,
-                                 findStrain(startPos));
+                                 findStrain(startPos), distanceFromLeftEnd);
     }
     return textMatches;
 }
@@ -1158,18 +1021,19 @@ FMIndexDBG<positionClass>::separationIsNext(positionClass pos) const {
 template <class positionClass>
 void FMIndexDBG<positionClass>::extendFMPos(
     const SARangePair& parentRanges,
-    std::vector<FMPosExt<positionClass>>& stack, int row, int trueDepth) {
+    std::vector<FMPosExt<positionClass>>& stack, int row, int trueDepth) const {
 
     // iterate over the entire alphabet, excluding the separation characters
-    for (length_t i = 2; i < this->sigma.size(); i++) {
+    for (length_t i = 2; i < sigma.size(); i++) {
 
-        this->extendFMPosIntermediary(parentRanges, stack, row, i, trueDepth);
+        extendFMPosIntermediary(parentRanges, stack, row, i, trueDepth);
     }
 }
 
 template <class positionClass>
 void FMIndexDBG<positionClass>::extendFMPos(
-    const positionClass& pos, std::vector<FMPosExt<positionClass>>& stack) {
+    const positionClass& pos,
+    std::vector<FMPosExt<positionClass>>& stack) const {
 
     pos.extendFMPos(stack);
 }
@@ -1177,73 +1041,162 @@ void FMIndexDBG<positionClass>::extendFMPos(
 template <class positionClass>
 FMOccSFI<positionClass> FMIndexDBG<positionClass>::findNodePathForMatch(
     const FMOcc<positionClass>& occ) {
+    auto start = chrono::high_resolution_clock::now();
     // Refer to the correct path finding function
     std::vector<uint32_t> path = {};
-    findNodePathForMatchForward(occ.getPosition(), occ.getShift(), path);
-    this->redundantNodePathsCounter++;
-    return FMOccSFI<positionClass>(occ, path);
+    uint32_t distanceFromLeftEnd = 0;
+    findNodePathForMatchForward(occ.getPosition(), occ.getShift(), path,
+                                distanceFromLeftEnd);
+    redundantNodePathsCounter++;
+    auto finish = chrono::high_resolution_clock::now();
+    elapsedNodePaths += finish - start;
+    return FMOccSFI<positionClass>(occ, path, distanceFromLeftEnd);
+}
+
+template <class positionClass>
+void FMIndexDBG<positionClass>::findNodeUnderK(
+    const positionClass& pos, const int& shift,
+    std::vector<uint32_t>&
+        path) { // TODO: greedy version, could use some more tweaking
+    length_t originalDepth = pos.getDepth();
+
+    setDirection(BACKWARD);
+
+    std::vector<FMPosExt<positionClass>> stack;
+    std::vector<FMPosExt<positionClass>> candidatesAfterSearch;
+    std::vector<FMPosExt<positionClass>> candidatesNearStartOfGenome;
+    stack.push_back(FMPosExt<positionClass>((char)0, pos));
+    length_t originalWidth = pos.getRanges().width();
+    while (!stack.empty()) {
+        FMPosExt<positionClass> p = stack.back();
+        stack.pop_back();
+        if (p.getTrueDepth() == k_DBG) {
+            candidatesAfterSearch.push_back(p);
+            originalWidth -= p.getRanges().width();
+        } else {
+            extendFMPos(p, stack);
+        }
+        length_t newWidth = 0;
+        for (auto tempPos : stack) {
+            newWidth += tempPos.getRanges().width();
+        }
+        if (newWidth != originalWidth) {
+            candidatesNearStartOfGenome.push_back(p);
+        }
+    }
+
+    setDirection(FORWARD);
+
+    for (FMPosExt<positionClass> p : candidatesNearStartOfGenome) {
+        stack.push_back(FMPosExt<positionClass>((char)0, p));
+    }
+
+    while (!stack.empty()) {
+        FMPosExt<positionClass> p = stack.back();
+        stack.pop_back();
+        if (p.getTrueDepth() == k_DBG) {
+            candidatesAfterSearch.push_back(p);
+            originalWidth -= p.getRanges().width();
+        } else {
+            extendFMPos(p, stack);
+        }
+        length_t newWidth = 0;
+        for (auto tempPos : stack) {
+            newWidth += tempPos.getRanges().width();
+        }
+        if (newWidth != originalWidth) {
+            candidatesNearStartOfGenome.push_back(p);
+        }
+    }
+
+    std::vector<pair<uint32_t, uint32_t>> stack2;
+
+    for (FMPosExt<positionClass> p : candidatesAfterSearch) {
+        // Get the left boundary of the SA interval of the match
+        length_t rb = p.getRanges().getRangeSA().getEnd();
+        // Find the corresponding node of the path along with the
+        // distance of the k-mer of the match to the beginning of the node
+        uint32_t id, l;
+        findID(rb, id, l);
+        if (!std::count(path.begin(), path.end(), id)) {
+            path.push_back(id);
+            auto len = G[id].len;
+            auto var = len - l - k_DBG + originalDepth;
+            if (var < k_DBG) {
+                stack2.push_back(make_pair(id, var - originalDepth));
+            }
+        }
+    }
+
+    while (!stack2.empty()) {
+        auto pair = stack2.back();
+        stack2.pop_back();
+        for (size_t i = 2; i < sigma.size(); i++) {
+            // Check if there exists a successor that is the result of
+            // extension with the current character
+            uint32_t id_successor;
+            if (jumpToSuccessorWithChar(pair.first, id_successor, i)) {
+                if (!std::count(path.begin(), path.end(), id_successor)) {
+                    path.push_back(id_successor);
+                    auto var = pair.second + G[id_successor].len - k_DBG + 1 +
+                               originalDepth;
+                    if (var < k_DBG) {
+                        stack2.push_back(
+                            make_pair(id_successor, var - originalDepth));
+                    }
+                }
+            }
+        }
+    }
 }
 
 template <class positionClass>
 void FMIndexDBG<positionClass>::findNodePathForMatchForward(
-    const positionClass& occ, const int& shift,
-    std::vector<uint32_t>& path) const {
-    // A match shorter than k does not have a corresponding node path
-    if (occ.getDepth() < k) {
-        std::cout
-            << "WARNING: a match shorter than k was detected and will not be "
-               "reported."
-            << std::endl;
+    const positionClass& occ, const int& shift, std::vector<uint32_t>& path,
+    uint32_t& distanceFromLeftEnd) {
+    // A match shorter than k does not have a unique node path
+    if (occ.getTrueDepth() < k_DBG) {
+        // Find all corresponding nodes
+        findNodeUnderK(occ, shift, path);
         return;
     }
     // Get the left boundary of the SA interval of the match
     length_t lb = occ.getRanges().getRangeSA().getBegin();
+    // Get the start position of an occurrence in the reference text
+    length_t positionInText = findSA(lb) + shift;
+    // Get the string corresponding to the first k-mer of the occurrence
+    string firstKmer =
+        text.decodeSubstring(sigma, positionInText, positionInText + k_DBG);
+    // Get the SA range corresponding to this first k-mer
+    Range kmerRange = matchString(firstKmer);
     // Find the first node of the path along with the distance of the first
     // k-mer of the match to the beginning of the first node
-
-    // TODO: why are id, l andn offset_reverse signed ints?
-    // This gives compiler warnings for comparison with unsigned ints
-    uint32_t id, l, offset_reverse;
-    findIDandOffset(lb, id, l, offset_reverse);
-    // Find the distance of the first k-mer of the match to the end of the first
-    // node
-    l = G[id].len - l - k;
-    // Check if the current node is an end node
-    bool endNode = id >= numberOfGraphNodes - numberOfStrains;
-    // Store how much characters of the match still need to be handled
-    int numberOfSteps = occ.getDepth() - k - 1;
-    int pos = numberOfSteps + shift - l;
-    // In case there is a shift present, check if the node is already part of
-    // the path
-    if (pos <= numberOfSteps) {
-        path.emplace_back(id);
-    }
-    while (pos >= 0) {
-        // If the previous node was an end node, it should have been the last
-        // one. Otherwise, an empty path is returned
-        // TODO: remove this if fixed in underlying code
-        if (endNode) {
-            path = {};
-            return;
-        }
-        // Find the ID of the next node along with the new offset
-        id = jumpToSuccessorThroughEdge(id, offset_reverse);
-        // Check if the new node is an end node
-        endNode = id >= numberOfGraphNodes - numberOfStrains;
+    uint32_t id, pos;
+    findID(kmerRange.getEnd(), id, pos);
+    // Set distanceFromLeftEnd
+    distanceFromLeftEnd = pos;
+    // Find the distance of the the beginning of first k-mer of the match to the
+    // end of the first node. This reflects how much of the occurrence has been
+    // handled.
+    pos = G[id].len - pos;
+    // Store the start node in the node path
+    path.emplace_back(id);
+    while (pos < occ.getDepth()) {
+        // Copy the old id
+        uint32_t oldID = id;
+        // Find the ID of the successor using the next character of the
+        // occurrence
+        jumpToSuccessorWithChar(oldID, id, text[positionInText + pos]);
         // Find the new position in the match based on the length of the new
         // node
-        l = G[id].len - k;
-        pos -= l + 1;
-        // In case there is a shift present...
-        if (pos <= numberOfSteps) {
-            // Add the new node to the path
-            path.emplace_back(id);
-        }
+        pos += G[id].len - (k_DBG - 1);
+        // Add the new node to the path
+        path.emplace_back(id);
     }
 }
 
 template <class positionClass>
-int FMIndexDBG<positionClass>::findStrain(length_t input) {
+int FMIndexDBG<positionClass>::findStrain(length_t input) const {
     int b = 0;
     int e = sorted_startpositions.size();
     if (input >= sorted_startpositions[e - 1]) {
@@ -1270,60 +1223,6 @@ int FMIndexDBG<positionClass>::findStrain(length_t input) {
 // ----------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
-// ROUTINES FOR EXACT PATTERN MATCHING
-// ----------------------------------------------------------------------------
-
-template <class positionClass>
-std::vector<TextOccurrenceSFI>
-FMIndexDBG<positionClass>::ExactMatchSFI(const string& pattern) {
-    // A pattern shorter than k does not have a corresponding node path
-    uint m = pattern.length();
-    if (m < k) {
-        throw std::runtime_error("Pattern length cannot be smaller than k");
-    }
-    this->setDirection(BACKWARD);
-    // Find the SA ranges for the rightmost k-mer of the pattern
-    SARangePair p = this->matchStringBidirectionally(
-        Substring(pattern, m - k, m, BACKWARD));
-
-    if (p.getRangeSA().getBegin() >= p.getRangeSA().getEnd()) {
-        // The rightmost k-mer does not occur in the reference
-        return std::vector<TextOccurrenceSFI>{};
-    }
-    // Find the last node of the path along with the distance of the last
-    // k-mer of the pattern to the beginning of the last node
-    uint32_t id, l;
-    findID(p.getRangeSA().getBegin(), id, l);
-    // Initialize the node path with the last node
-    std::vector<uint32_t> resList = {id};
-    // Store how much characters of the match still need to be handled
-    int pos = m - k - 1;
-    while (p.getRangeSA().getBegin() < p.getRangeSA().getEnd() && pos >= 0) {
-        // Add the next character of the pattern to the current match
-        this->addChar(pattern[pos], p);
-        pos--;
-
-        if (l > 0) {
-            // We stay within the current node
-            l--;
-        } else {
-            // We jump to a predecessor and need to find its ID
-            id = findIDLast(p.getRangeSA().getBegin());
-            // Add the new node to the path
-            resList.insert(resList.begin(), id);
-            // Find the current distance to the beginning of the current node
-            l = G[id].len - k;
-        }
-    }
-    if (p.getRangeSA().getBegin() >= p.getRangeSA().getEnd()) {
-        // The complete pattern does not occur in the reference
-        return std::vector<TextOccurrenceSFI>{};
-    } else {
-        return convertToMatchesInTextSFI(p, resList, pattern.length());
-    }
-}
-
-// ----------------------------------------------------------------------------
 // ROUTINES FOR APPROXIMATE PATTERN MATCHING
 // ----------------------------------------------------------------------------
 
@@ -1333,7 +1232,7 @@ FMIndexDBG<positionClass>::approxMatchesNaiveSFI(const std::string& pattern,
                                                  length_t maxED) {
 
     std::vector<FMOcc<positionClass>> occurrences =
-        this->approxMatchesNaiveIntermediate(pattern, maxED);
+        approxMatchesNaiveIntermediate(pattern, maxED);
 
     return mapOccurrencesInSAToOccurrencesInTextSFI(occurrences, maxED);
 }
@@ -1342,6 +1241,7 @@ template <class positionClass>
 std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>
 FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
     std::vector<FMOcc<positionClass>>& occ, const int& maxED) {
+    auto start = chrono::high_resolution_clock::now();
 
     sort(occ.begin(), occ.end());
     occ.erase(unique(occ.begin(), occ.end()), occ.end());
@@ -1351,20 +1251,24 @@ FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
     map<length_t, TextOccurrenceSFI> posToBestMatch;
 
     if (occ.size() == 0) {
+        auto finish = chrono::high_resolution_clock::now();
+        elapsedSAtoText += finish - start;
         return {};
     }
     if (occ.size() == 1) {
         // all occ are distinct
-        this->positionsInPostProcessingCounter = occ[0].getRanges().width();
-        auto m = convertToMatchesInTextSFI(findNodePathForMatch(occ[0]));
-        sort(m.begin(), m.end());
-        for (auto& occ : m) {
-            occ.generateOutput();
-        }
+        positionsInPostProcessingCounter = occ[0].getRanges().width();
+        const auto& m = convertToMatchesInTextSFI(findNodePathForMatch(occ[0]));
         std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>> paths;
-        for (auto occ : m) {
-            paths[occ.getNodePath()].emplace_back(occ);
+        for (const auto& mOcc : m) {
+            paths[mOcc.getNodePath()].emplace_back(mOcc);
+            paths[mOcc.getNodePath()].back().generateOutput();
         }
+        for (const auto& myPair : paths) {
+            sort(paths[myPair.first].begin(), paths[myPair.first].end());
+        }
+        auto finish = chrono::high_resolution_clock::now();
+        elapsedSAtoText += finish - start;
         return paths;
     }
 
@@ -1372,9 +1276,9 @@ FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
     for (const auto& it : occ) {
 
         const Range& range = it.getRanges().getRangeSA();
-        this->positionsInPostProcessingCounter += range.width();
+        positionsInPostProcessingCounter += range.width();
 
-        auto matchesInTextToCheck =
+        const auto& matchesInTextToCheck =
             convertToMatchesInTextSFI(findNodePathForMatch(it));
         occurrencesInText.insert(occurrencesInText.end(),
                                  matchesInTextToCheck.begin(),
@@ -1424,7 +1328,8 @@ FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
     for (TextOccurrenceSFI occ : nonRedundantOcc) {
         paths[occ.getNodePath()].emplace_back(occ);
     }
-
+    auto finish = chrono::high_resolution_clock::now();
+    elapsedSAtoText += finish - start;
     return paths;
 }
 
@@ -1642,7 +1547,7 @@ bool FMIndexDBG<positionClass>::handleIfPrefix(
         // A complete prefix was found
 
         // Now check if one of these two occurrences can actually replace
-        // eachother. This is only the case if their starting point wrt the
+        // each other. This is only the case if their starting point wrt the
         // first node is within a maximum distance.
         if (!(FMOccSFR::checkProximity)(
                 previousMatches[len - minLen - decrease], m, maxED)) {
@@ -1818,7 +1723,7 @@ void FMIndexDBG<positionClass>::filterLinearInOneDirection(
 
     // Create the previousMatches vector, which will store the prefixbranch that
     // is considered at a given time in the algorithm. A prefix branch is a set
-    // of occurrences, all of which are prefixes of eachother.
+    // of occurrences, all of which are prefixes of each other.
     std::vector<FMOccSFR*> previousMatches(maxLen - minLen + 1, nullptr);
     // Create the previousMinimums vector, which will store the minimum
     // occurrences that correspond to the occurrences in previousMatches. A
@@ -2023,7 +1928,7 @@ void FMIndexDBG<positionClass>::filterDifferentNodePathsComplete(
                                 // other
 
                                 // Now check if one of these two occurrences can
-                                // actually replace eachother. This is only the
+                                // actually replace each other. This is only the
                                 // case if their starting point wrt the graph
                                 // is within a maximum distance.
 
@@ -2050,7 +1955,7 @@ void FMIndexDBG<positionClass>::filterDifferentNodePathsComplete(
                                                   .getDistanceFromLeftEnd();
                                 }
                                 // Also take the nodes of the longest path that
-                                // occure before the shortest path in
+                                // occurs before the shortest path in
                                 // consideration
                                 for (size_t nodeIterator = 0;
                                      nodeIterator < index; nodeIterator++) {
@@ -2116,7 +2021,17 @@ std::vector<FMOccSFR> FMIndexDBG<positionClass>::filterStrainFreeMatches(
     bool linear = !filteringOptionComplete;
 
     // Increase the total number of reported matches
-    this->positionsInPostProcessingCounter += occ.size();
+    positionsInPostProcessingCounter += occ.size();
+
+    for (auto& o : occ) {
+        if (o.getPosition().getNodePath().empty()) {
+            vector<uint32_t> nodePath;
+            FMPosSFR pos = o.getPosition();
+            findNodeUnderK(pos, 0, nodePath);
+            pos.setNodePath(nodePath);
+            o.setPosition(pos);
+        }
+    }
 
     // Sort the occurrences
     if (linear) {
@@ -2193,8 +2108,9 @@ void FMIndexDBG<positionClass>::initializeFilesForVisualization(
 
     if (!multipleSubgraphs) {
         // Write out the headers if this was not yet done
-        edgefile << "EdgeKey\tSource\tOmegaShort\tOmegaFull\tPartOfPath\tTarget"
-                    "\tOmegaShort\tOmegaFull\tPartOfPath\tColor\n";
+        edgefile
+            << "EdgeKey\tSource\tOmegaShort\tOmegaFull\tPartOfPath\tTarget"
+               "\tOmegaShort\tOmegaFull\tPartOfPath\tColor\tEdgeMultiplicity\n";
     }
 }
 
@@ -2217,9 +2133,11 @@ void FMIndexDBG<positionClass>::fillInVisualizationNode(
 
     // Check if this node is part of the original node path
     bool part_of_path = std::count(path.begin(), path.end(), id) > 0;
+    // Get the index of an occurrence of this node in the text
+    length_t indexInText = findSA(node.left_kmer_forward);
     // Get the string corresponding to the node
     string omega =
-        this->text.substr(this->findSA(node.left_kmer_forward), node.len);
+        text.decodeSubstring(sigma, indexInText, indexInText + node.len);
     string omega_short;
 
     // Get the short version of the string corresponding to the node
@@ -2245,8 +2163,10 @@ template <class positionClass>
 void FMIndexDBG<positionClass>::visualizeSubgraphIntermediary(
     std::vector<uint32_t>& path, std::string subgraph_id,
     std::vector<uint32_t>& visited_nodes,
-    std::queue<std::pair<int, int>>& node_queue, std::ofstream& edgefile,
-    size_t& edgecounter, std::vector<VisualizationNode*>& visualizedNodes) {
+    std::queue<std::pair<int, int>>& node_queue,
+    std::map<std::string, std::map<length_t, length_t>>& edges,
+    size_t& edgecounter, std::vector<VisualizationNode*>& visualizedNodes,
+    bool separateEdges, std::set<uint32_t>& subgraphNodes) {
 
     // Take the next node ID from the queue along with its neighborhood depth
     std::pair<int, int> p = node_queue.front();
@@ -2254,6 +2174,7 @@ void FMIndexDBG<positionClass>::visualizeSubgraphIntermediary(
     // Find the corresponding node
     uint32_t id = p.first;
     Node node = G[id];
+    subgraphNodes.insert(id);
     uint32_t current_depth = p.second;
 
     // Create the visualization node with extra attributes such as omega, if
@@ -2291,21 +2212,31 @@ void FMIndexDBG<positionClass>::visualizeSubgraphIntermediary(
                     *visualizedNodes[id_predecessor];
 
                 // Report the edge between the current node and its predecessor,
-                // along with the node attributes
-                edgefile << subgraph_id << "_Edge" << edgecounter << "\t"
-                         << subgraph_id << id_predecessor << "\t"
-                         << id_predecessor << ":"
-                         << visNodePredecessor.omega_short << "\t"
-                         << visNodePredecessor.omega << "\t"
-                         << visNodePredecessor.part_of_path << "\t"
-                         << subgraph_id << id << "\t" << id << ":"
-                         << visNode.omega_short << "\t" << visNode.omega << "\t"
-                         << visNode.part_of_path << "\t"
-                         << findStrain(this->findSA(i + node.left_kmer_forward))
-                         << "\n";
+                // along with the node attributes to a temporary buffer
+                std::stringstream buffer;
+                buffer << subgraph_id << "_Edge" << edgecounter << "\t"
+                       << subgraph_id << id_predecessor << "\t"
+                       << id_predecessor << ":"
+                       << visNodePredecessor.omega_short << "\t"
+                       << visNodePredecessor.omega << "\t"
+                       << visNodePredecessor.part_of_path << "\t" << subgraph_id
+                       << id << "\t" << id << ":" << visNode.omega_short << "\t"
+                       << visNode.omega << "\t" << visNode.part_of_path;
+                if (separateEdges) {
+                    // Each edge is reported separately with its corresponding
+                    // strain ID
+                    buffer << "\t"
+                           << findStrain(findSA(i + node.left_kmer_forward));
+                    edges[buffer.str()][0]++;
+                } else {
+                    // All edges between the same nodes are bundled into one.
+                    // Strain IDs and multiplicities are stored as an attribute
+                    edges[buffer.str()]
+                         [findStrain(findSA(i + node.left_kmer_forward))]++;
+                }
                 // Make sure the predecessor is visited if it is within the
                 // neighborhood depth
-                if (!nodePredecessor.visited && current_depth > 0) {
+                if (!nodePredecessor.visited) {
                     visitNode(id_predecessor, current_depth - 1, visited_nodes,
                               node_queue);
                 }
@@ -2314,10 +2245,9 @@ void FMIndexDBG<positionClass>::visualizeSubgraphIntermediary(
     }
     // Check that the current node is not an end note and that its successors
     // still belong to the neighborhood
-    if (!(node.right_kmer_forward < (length_t)numberOfStrains) &&
-        current_depth > 0) {
+    if (id < numberOfGraphNodes - numberOfStrains && current_depth > 0) {
         // Iterate over all possible characters
-        for (size_t i = 0; i < this->sigma.size(); i++) {
+        for (size_t i = 0; i < sigma.size(); i++) {
             uint32_t id_successor;
             // Try to jump to a new character by appending a character to the
             // substring of the current node.
@@ -2353,16 +2283,17 @@ void FMIndexDBG<positionClass>::visualizeSubgraphIntermediary(
 // ----------------------------------------------------------------------------
 
 template <class positionClass>
-void FMIndexDBG<positionClass>::visualizeSubgraph(std::vector<uint32_t>& path,
-                                                  uint32_t depth,
-                                                  std::string filename,
-                                                  bool multipleSubgraphs,
-                                                  string subgraph_id) {
+std::set<uint32_t> FMIndexDBG<positionClass>::visualizeSubgraph(
+    std::vector<uint32_t>& path, uint32_t depth, std::string filename,
+    bool separateEdges, bool multipleSubgraphs, string subgraph_id) {
     std::cout << "Constructing subgraph..." << std::endl;
 
     // Initialize the output file
     std::ofstream edgefile;
     initializeFilesForVisualization(filename, multipleSubgraphs, edgefile);
+
+    // Save all nodes in the subgraph
+    std::set<uint32_t> subgraphNodes;
 
     // Initialize a std::vector that keeps track of all visited nodes
     std::vector<uint32_t> visited_nodes{};
@@ -2384,18 +2315,57 @@ void FMIndexDBG<positionClass>::visualizeSubgraph(std::vector<uint32_t>& path,
     // Create an empty array that will eventually contain all nodes visualized
     std::vector<VisualizationNode*> visualizedNodes(G.size(), nullptr);
 
+    // Create an empty map that will eventually contain all edges visualized
+    std::map<std::string, std::map<length_t, length_t>> edges;
+
     // Iterate over all nodes in the neighborhood of the node path
     while (!node_queue.empty()) {
-        visualizeSubgraphIntermediary(path, subgraph_id, visited_nodes,
-                                      node_queue, edgefile, edgecounter,
-                                      visualizedNodes);
+        visualizeSubgraphIntermediary(
+            path, subgraph_id, visited_nodes, node_queue, edges, edgecounter,
+            visualizedNodes, separateEdges, subgraphNodes);
+    }
+
+    // Write out the edges to the actual output file
+    for (const auto& edgePair : edges) {
+        // Write out all attributes except for the strain ID and multiplicity
+        // data
+        edgefile << edgePair.first << "\t";
+        // Initialize bool necessary for bundled edges
+        bool firstEntry = true;
+        // Initialize the total edge multiplicity, also necessary for bundled
+        // edges
+        length_t edgeMultiplicity = 0;
+        // Iterate over all <ID,multiplicity> pairs
+        for (const auto& subPair : edgePair.second) {
+            if (separateEdges) {
+                // No bundled edges, so there is only one edge pair present
+                edgefile << subPair.second;
+            } else {
+                // Bundled edges
+                if (firstEntry) {
+                    firstEntry = false;
+                } else {
+                    // Separation character between <ID,multiplicity> pairs
+                    edgefile << ",";
+                }
+                // Write out the strain ID with its multiplicity as color
+                edgefile << subPair.first << ":" << subPair.second;
+                // Keep track of the total multiplicity
+                edgeMultiplicity += subPair.second;
+            }
+        }
+        if (!separateEdges) {
+            // For bundled edges: write out the total multiplicity
+            edgefile << "\t" << edgeMultiplicity;
+        }
+        edgefile << "\n";
     }
 
     // Close output file
     edgefile.close();
 
     // Memory cleanup
-    for (auto visNode : visualizedNodes) {
+    for (const auto& visNode : visualizedNodes) {
         if (visNode) {
             delete visNode;
         }
@@ -2407,23 +2377,27 @@ void FMIndexDBG<positionClass>::visualizeSubgraph(std::vector<uint32_t>& path,
     for (size_t i = 0; i < visited_nodes.size(); i++) {
         G[visited_nodes[i]].visited = false;
     }
+
+    return subgraphNodes;
 }
 
 // For strain-fixed matching:
 template <class positionClass>
 void FMIndexDBG<positionClass>::visualizeSubgraphs(
-    std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>& paths,
-    uint32_t depth, std::string filename) {
+    const std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>&
+        paths,
+    uint32_t depth, std::string filename, bool separateEdges) {
     std::ofstream edgefile;
     std::ofstream overviewfile;
-    this->getText(); // TODO: is this efficient?
-    // Create the outputfiles
+    getText();
+    // Create the output files
     edgefile.open(filename + "_SubgraphEdges.tsv");
     overviewfile.open(filename + "_SubgraphOverview.tsv");
-    // Initialize the headers of the outputfiles
+    // Initialize the headers of the output files
     edgefile << "EdgeKey\tSource\tOmegaShort\tOmegaFull\tPartOfPath\tTarget\tOm"
-                "egaShort\tOmegaFull\tPartOfPath\tColor\n";
-    overviewfile << "SubgraphID\tPath\tStrain\tPosition\tLength\tED\n";
+                "egaShort\tOmegaFull\tPartOfPath\tColor\tEdgeMultiplicity\n";
+    overviewfile << "SubgraphID\tPath\tDistanceFromLeftEnd\tStrain\tPosition\tL"
+                    "ength\tED\n";
 
     edgefile.close();
 
@@ -2432,17 +2406,21 @@ void FMIndexDBG<positionClass>::visualizeSubgraphs(
     for (const auto& path : paths) {
         // Visualize the subgraph corresponding to this path
         std::vector<uint32_t> nodepath = path.first;
-        visualizeSubgraph(nodepath, depth, filename, true,
+        visualizeSubgraph(nodepath, depth, filename, separateEdges, true,
                           "Subgraph" + to_string(counter) + "_");
         // Report all matches in the reference text that correspond to this path
         for (length_t i = 0; i < path.second.size(); i++) {
+            // Determine the separation character based on the occurrence length
+            char separationchar =
+                path.second[i].getRange().width() < k_DBG ? '/' : ',';
             // Report the path
             overviewfile << counter << "\t" << nodepath[0];
             for (length_t i = 1; i < nodepath.size(); i++) {
-                overviewfile << "," << nodepath[i];
+                overviewfile << separationchar << nodepath[i];
             }
             // Report information on the match in the reference
-            overviewfile << "\t" << path.second[i].getStrain() << "\t"
+            overviewfile << "\t" << path.second[i].getDistanceFromLeftEnd()
+                         << "\t" << path.second[i].getStrain() << "\t"
                          << path.second[i].getRange().getBegin() << "\t"
                          << path.second[i].getRange().width() << "\t"
                          << path.second[i].getDistance() << "\n";
@@ -2454,19 +2432,19 @@ void FMIndexDBG<positionClass>::visualizeSubgraphs(
 
 // For strain-free matching:
 template <class positionClass>
-void FMIndexDBG<positionClass>::visualizeSubgraphs(std::vector<FMOccSFR>& paths,
-                                                   uint32_t depth,
-                                                   std::string filename) {
+void FMIndexDBG<positionClass>::visualizeSubgraphs(
+    const std::vector<FMOccSFR>& paths, uint32_t depth, std::string filename,
+    bool separateEdges) {
     std::ofstream nodefile;
     std::ofstream edgefile;
     std::ofstream overviewfile;
-    this->getText(); // TODO: is this efficient?
-    // Create the outputfiles
+    getText();
+    // Create the output files
     edgefile.open(filename + "_SubgraphEdges.tsv");
     overviewfile.open(filename + "_SubgraphOverview.tsv");
-    // Initialize the headers of the outputfiles
+    // Initialize the headers of the output files
     edgefile << "EdgeKey\tSource\tOmegaShort\tOmegaFull\tPartOfPath\tTarget\tOm"
-                "egaShort\tOmegaFull\tPartOfPath\tColor\n";
+                "egaShort\tOmegaFull\tPartOfPath\tColor\tEdgeMultiplicity\n";
     overviewfile << "SubgraphID\tPath\tDistanceFromLeftEnd\tLength\tED\n";
 
     edgefile.close();
@@ -2476,7 +2454,7 @@ void FMIndexDBG<positionClass>::visualizeSubgraphs(std::vector<FMOccSFR>& paths,
     for (const auto& path : paths) {
         // Visualize the subgraph corresponding to this path
         std::vector<uint32_t> nodepath = path.getPosition().getNodePath();
-        visualizeSubgraph(nodepath, depth, filename, true,
+        visualizeSubgraph(nodepath, depth, filename, separateEdges, true,
                           "Subgraph" + to_string(counter) + "_");
         // Report the match in the reference text that corresponds to this path
         overviewfile << counter << "\t" << nodepath[0];

@@ -29,99 +29,148 @@
  *
  */
 void showUsage() {
-    cout << "Usage: ./nexus [options] basefilename readfile.[ext]\n\n";
-    cout << " [options]\n";
-    cout << " -sfr --strain-free\tstrain-free matching\n";
-    cout << " -e   --max-ed\t\tmaximum edit distance [default = 0]\n";
-    cout << " -s   --sa-sparseness\tsuffix array sparseness factor "
-            "[default = "
-            "1]\n";
-    cout << " -c   --cp-sparseness\tsparseness factor that indicates "
-            "how many checkpoints must be stored to identify nodes. Use "
-            "\"none\" to use no checkpoints. Choose a value that was also used "
-            "during the building process. "
-            "[default = 128]\n";
-    cout
-        << " -f   --filter\t\tfiltering type that should be used to filter the "
-           "occurrences. This option is only valid in case of strain-free "
-           "matching. Options:\n\t"
-        << "linear\t\tlinear filtering is efficient but does not filter out "
-           "all redundant occurrences. Additionally, in some exceptional "
-           "cases, a non-optimal replacement occurrence can be chosen. This "
-           "is the default option.\n\t"
-        << "complete\tcomplete filtering leads to a set of occurrences with "
-           "no redundancy. This option is very slow however and thus not "
-           "recommended.\n";
-    cout << " -p   --partitioning\t\tAdd flag to do uniform/static/dynamic "
-            "partitioning. Dynamic partitioning cannot be used with "
-            "strain-free matching. [default = static]\n";
-    cout << " -m   --metric\t\tAdd flag to set distance metric "
-            "(editnaive/editopt/hamming) [default = editopt]\n";
-    cout << " -ss  --search-scheme\tChoose the search scheme\n  options:\n\t"
-         << "kuch1\tKucherov k + 1\n\t"
-         << "kuch2\tKucherov k + 2\n\t"
-         << "kianfar\tOptimal Kianfar scheme\n\t"
-         << "manbest\tManual best improvement for Kianfar scheme (only for ed "
-            "= 4)\n\t"
-         << "pigeon\tPigeonhole scheme\n\t"
-         << "01*0\t01*0 search scheme\n\t"
-         << "naive\tnaive backtracking\n\t"
-         << "custom\tcustom search scheme, the next parameter should be a path "
-            "to the folder containing this search scheme\n\n";
+    cout <<
 
-    cout << "[ext]\n"
-         << "\tone of the following: fq, fastq, FASTA, fasta, fa\n";
+        "This program aligns short, single end reads to a pan-genome de "
+        "Bruijn\n"
+        "graph. It reports the corresponding node paths as well as the\n"
+        "coordinates in the original genomes.\n\n\n"
 
-    cout << "Following input files are required:\n";
-    cout << "\t<base filename>.txt: input text T\n";
-    cout << "\t<base filename>.cct: character counts table\n";
-    cout << "\t<base filename>.sa.[saSF]: sparse suffix array, with suffix "
-            "array sparseness factor [saSF] "
-            "elements\n";
-    cout << "\t<base filename>.sa.bv.[saSF]: bitvector indicating which "
-            "elements of the suffix array are stored.\n";
-    cout << "\t<base filename>.bwt: BWT of T\n";
-    cout << "\t<base filename>.rev.bwt: BWT of the reverse of T\n";
-    cout << "\t<base filename>.brt: Prefix occurrence table of T\n";
-    cout << "\t<base filename>.rev.brt: Prefix occurrence table of the "
-            "reverse "
-            "of T\n";
-    cout << "\t<base filename>.DBG: variable k and the compressed de "
-            "Bruijn graph.\n";
-    cout << "\t<base filename>.B.left: bitvector B_left for the compressed de "
-            "Bruijn graph.\n";
-    cout << "\t<base filename>.B.right.[cpSF]: bitvector B_right for the "
-            "compressed "
-            "de "
-            "Bruijn graph, with checkpoint sparseness factor [cpSF].\n";
-    cout << "\t<base filename>.B.right.full.[cpSF]: bitvector B_right_full for "
-            "the "
-            "compressed de Bruijn graph, with checkpoint sparseness factor "
-            "[cpSF].\n";
-    cout << "\t<base filename>.left.map: node identifier mapping corresponding "
-            "to B_left.\n";
-    cout << "\t<base filename>.right.map.[cpSF]: node identifier mapping "
-            "corresponding "
-            "to B_right, with checkpoint sparseness factor [cpSF].\n";
+        "Usage: ./nexus [options] <basefilename> <k> <readfile.[ext]>\n\n"
+
+        " Following input parameters are required:\n"
+        "  <basefilename>      base filename of the input index\n"
+        "  <k>                 the de Bruijn parameter of the index\n"
+        "  <readfile.[ext]>    the file containing the input reads to be\n"
+        "                      aligned (single end).\n\n"
+
+        " [ext]\n"
+        "  one of the following: fq, fastq, FASTA, fasta, fa\n\n\n"
+
+        " [options]\n"
+        "  -e/--max-ed         maximum edit distance [default = 0]\n\n"
+
+        "  -s/--sa-sparseness  suffix array sparseness factor [default = "
+        "16]\n\n"
+
+        "  -c/--cp-sparseness  sparseness factor that indicates how many\n"
+        "                      checkpoints must be stored to identify nodes.\n"
+        "                      Use \"none\" to use no checkpoints. Choose a\n"
+        "                      value that was also used during the building\n"
+        "                      process. [default = 128]\n\n"
+
+        "  -p/--partitioning   Add flag to do uniform/static/dynamic\n"
+        "                      partitioning of the seeds for search schemes.\n"
+        "                      Dynamic partitioning cannot be used with\n"
+        "                      strain-free matching. [default = dynamic]\n\n"
+
+        "  -m/--metric         Add flag to set distance metric (editnaive/\n"
+        "                      editopt/ hamming) [default = editopt]\n\n"
+
+        "  -ss/--search-scheme Choose the search scheme. Options:\n"
+        "                       * kuch1    Kucherov k + 1 [default]\n"
+        "                       * kuch2    Kucherov k + 2\n"
+        "                       * kianfar  Optimal Kianfar scheme\n"
+        "                       * manbest  Manual best improvement for "
+        "Kianfar\n"
+        "                                  scheme (only for ed = 4)\n"
+        "                       * pigeon   Pigeonhole scheme\n"
+        "                       * 01*0     01*0 search scheme\n"
+        "                       * naive    naive backtracking\n"
+        "                       * custom   custom search scheme, the next\n"
+        "                                  parameter should be a path to the\n"
+        "                                  folder containing this "
+        "searchscheme\n\n"
+
+        "  -sfr/--strain-free  strain-free matching: occurrences can be\n"
+        "                      identified as any path of connected nodes. In\n"
+        "                      other words, they do not have to occur exactly\n"
+        "                      in one of the input genomes of the pan-genome.\n"
+        "                      This is option is not activated by default and\n"
+        "                      is slower than the default implementation.\n\n"
+
+        "  -f/--filter         filtering type that should be used to filter\n"
+        "                      the occurrences. This option is only valid in\n"
+        "                      case of strain-free matching. Options:\n"
+        "                       * linear: linear filtering is efficient but\n"
+        "                         does not filter out all redundant\n"
+        "                         occurrences. Additionally, in some\n"
+        "                         exceptional cases, a non-optimal "
+        "replacement\n"
+        "                         occurrence can be chosen. This is the\n"
+        "                         default option.\n"
+        "                       * complete: complete filtering leads to a set\n"
+        "                         of occurrences with no redundancy. This\n"
+        "                         option is very slow however and thus not\n"
+        "                         recommended.\n\n\n"
+
+        " Following input files are required:\n"
+        "  <basefilename>.compressed.txt:           compressed version of the\n"
+        "                                           input text T\n\n"
+        "  <basefilename>.cct:                      character counts table\n\n"
+        "  <basefilename>.sa.<saSF>:                sparse suffix array, with\n"
+        "                                           suffix array sparseness\n"
+        "                                           factor <saSF> elements\n\n"
+        "  <basefilename>.sa.bv.<saSF>:             bitvector indicating "
+        "which\n"
+        "                                           elements of the suffix\n"
+        "                                           array are stored.\n\n"
+        "  <basefilename>.bwt:                      BWT of T\n\n"
+        "  <basefilename>.rev.bwt:                  BWT of the reverse of T\n\n"
+        "  <basefilename>.brt:                      Prefix occurrence table of "
+        "T\n\n"
+        "  <basefilename>.rev.brt:                  Prefix occurrence table "
+        "of\n"
+        "                                           the reverse of T\n\n"
+        "  <basefilename>.DBG.k<k>:                 the compressed de Bruijn\n"
+        "                                           graph for the requested "
+        "de\n"
+        "                                           Bruijn parameter\n\n"
+        "  <basefilename>.B.right.k<k>.cp<cpSF>:    first bitvector of the\n"
+        "                                           implicit representation "
+        "for\n"
+        "                                           the requested de Bruijn\n"
+        "                                           parameter, with "
+        "checkpoint\n"
+        "                                           sparseness factor "
+        "<cpSF>\n\n"
+        "  <basefilename>.B.left.k<k>:              second bitvector of the\n"
+        "                                           implicit representation\n"
+        "                                           for the requested de\n"
+        "                                           Bruijn parameter\n\n"
+        "  <basefilename>.right.map.k<k>.cp<cpSF>:  node identifier mapping\n"
+        "                                           corresponding to the "
+        "first\n"
+        "                                           bitvector, with "
+        "checkpoint\n"
+        "                                           sparseness factor "
+        "<cpSF>\n\n"
+        "  <basefilename>.left.map.k<k>:            node identifier mapping\n"
+        "                                           corresponding to the\n"
+        "                                           second bitvector\n\n\n";
 }
 
 int main(int argc, char* argv[]) {
 
-    int requiredArguments = 2; // baseFile of files and file containing reads
+    int requiredArguments = 3; // baseFile of files, k and file containing reads
+
+    if (argc == 2) {
+        string firstArg(argv[1]);
+        if (firstArg.find("help") != std::string::npos) {
+            showUsage();
+            return EXIT_SUCCESS;
+        }
+    }
 
     if (argc < requiredArguments) {
-        cerr << "Insufficient number of arguments" << endl;
+        cerr << "Insufficient number of arguments.\n" << endl;
         showUsage();
         return EXIT_FAILURE;
-    }
-    if (argc == 2 && strcmp("help", argv[1]) == 0) {
-        showUsage();
-        return EXIT_SUCCESS;
     }
 
     cout << "Welcome to Nexus!\n";
 
-    string saSparse = "1";
+    string saSparse = "16";
     string cpSparse = "128";
     string maxED = "0";
     string searchscheme = "kuch1";
@@ -130,7 +179,7 @@ int main(int argc, char* argv[]) {
     bool filteringIsChosen = false;
     bool filteringOptionComplete = false;
 
-    PartitionStrategy pStrat = STATIC;
+    PartitionStrategy pStrat = DYNAMIC;
     DistanceMetric metric = EDITOPTIMIZED;
 
     // process optional arguments
@@ -145,9 +194,11 @@ int main(int argc, char* argv[]) {
                 } else if (s == "dynamic") {
                     pStrat = DYNAMIC;
                     if (strainFree == true) {
-                        throw runtime_error(
-                            "Dynamic partitioning cannot be used with "
-                            "strain-free matching.");
+                        std::cout
+                            << "Dynamic partitioning cannot be used with "
+                               "strain-free matching, static is used instead."
+                            << std::endl;
+                        pStrat = STATIC;
                     }
                 } else if (s == "static") {
                     pStrat = STATIC;
@@ -247,14 +298,16 @@ int main(int argc, char* argv[]) {
                     "combination with strain-free matching.");
             }
             if (pStrat == DYNAMIC) {
-                throw runtime_error("Dynamic partitioning cannot be used with "
-                                    "strain-free matching.");
+                std::cout << "Dynamic partitioning cannot be used with "
+                             "strain-free matching, static is used instead."
+                          << std::endl;
+                pStrat = STATIC;
             }
         }
 
         else {
             cerr << "Unknown argument: " << arg << " is not an option" << endl;
-            return false;
+            return EXIT_FAILURE;
         }
     }
 
@@ -293,23 +346,15 @@ int main(int argc, char* argv[]) {
         throw runtime_error("manbest only supports 4 allowed errors");
     }
 
-    string baseFile = argv[argc - 2];
+    string baseFile = argv[argc - 3];
+    uint k = atoi(argv[argc - 2]);
     string readsFile = argv[argc - 1];
 
-    cout << "Reading in reads from " << readsFile << endl;
-    vector<pair<string, string>> reads;
-    try {
-        reads = getReads(readsFile);
-    } catch (const exception& e) {
-        string er = e.what();
-        er += " Did you provide a valid reads file?";
-        throw runtime_error(er);
-    }
     cout << "Start creation of BWT approximate matcher on graphs" << endl;
 
     if (strainFree) {
 
-        FMIndexDBG<FMPosSFR> bwt(baseFile, saSF, cpSF, strainFree,
+        FMIndexDBG<FMPosSFR> bwt(baseFile, saSF, cpSF, k, strainFree,
                                  filteringOptionComplete);
 
         SearchStrategyDBG<FMIndexDBG<FMPosSFR>, FMPosSFR>* strategy;
@@ -347,27 +392,12 @@ int main(int argc, char* argv[]) {
                                 " is not on option as search scheme");
         }
         StrainFreeMapper mapper(strategy);
-        doBenchSFR(reads, bwt, strategy, readsFile, ed, cpSparse);
+        doBenchSFR(bwt, strategy, readsFile, ed, cpSparse);
         delete strategy;
-
-        // // try {
-        // // auto results = mapper.matchApproxSFR("ACGAATCACCAA", ed);
-        // auto results = mapper.matchApproxSFR(
-        //     "AGGCCTGATAAGACGCGCTGGCGTCACATCAGGCAACGGCTGTCGGATGCAGCGTGAACGCCTTAT"
-        //     "CCGACCTACTGTTCTACTCCTGCGTAGGCCTGAT",
-        //     ed);
-        // bwt.visualizeSubgraphs(results, 3, "test");
-
-        // delete strategy;
-
-        // // } catch (const std::exception& e) {
-        // //     cerr << "Fatal error: " << e.what() << endl;
-        // //     return EXIT_FAILURE;
-        // // }
 
     } else {
 
-        FMIndexDBG<FMPos> bwt(baseFile, saSF, cpSF, strainFree);
+        FMIndexDBG<FMPos> bwt(baseFile, saSF, cpSF, k, strainFree);
 
         SearchStrategyDBG<FMIndexDBG<FMPos>, FMPos>* strategy;
         if (searchscheme == "kuch1") {
@@ -401,26 +431,8 @@ int main(int argc, char* argv[]) {
             throw runtime_error(searchscheme +
                                 " is not on option as search scheme");
         }
-        doBenchSFI(reads, bwt, strategy, readsFile, ed, cpSparse);
+        doBenchSFI(bwt, strategy, readsFile, ed, cpSparse);
         delete strategy;
-
-        // try {
-        //     // auto results = strategy->matchApproxSFI("GAATCACCAA", ed);
-        //     auto results = strategy->matchApproxSFI(
-        //         "GGTGGATAGGGTGGATAGGGTGGATAGGGTGGTTAGGGTGGATAGGGTGGATAGGGTGGATA"
-        //         "GGGTGGATAGGGTGGATAGGGTGGATAGGGTGGATAGGA",
-        //         ed);
-        //     bwt.visualizeSubgraphs(results, 3, "test");
-        //     // bwt.getText();
-        //     // std::vector<uint32_t> path = {551, 73827};
-        //     // bwt.visualizeSubgraph(path, 3, "testgraph");
-
-        //     delete strategy;
-
-        // } catch (const std::exception& e) {
-        //     cerr << "Fatal error: " << e.what() << endl;
-        //     return EXIT_FAILURE;
-        // }
     }
 
     cout << "Bye...\n";

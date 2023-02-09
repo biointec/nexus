@@ -29,13 +29,11 @@ using namespace std;
 
 extern vector<string> schemes;
 
-template <class T>
-void printMatches(vector<TextOccurrence> matches, string text, bool printLine,
-                  string duration, FMIndex<T>& mapper, string name);
-
 string getFileExt(const string& s);
 
-vector<pair<string, string>> getReads(const string& file);
+size_t getReads(vector<pair<string, string>>& reads, string& file,
+                ifstream& ifile, size_t chunkSize, string& line,
+                bool readWithN);
 
 double
 avgVec(vector<length_t> const& v); // note: the average must not be an integer
@@ -46,23 +44,21 @@ void writeToOutputSFI(
     const string& file,
     const vector<std::map<std::vector<uint32_t>,
                           std::vector<TextOccurrenceSFI>>>& mPerRead,
-    const vector<pair<string, string>>& reads);
+    const vector<pair<string, string>>& reads, bool& firstChunk, ofstream& f2);
 
 void writeToOutputSFR(const string& file,
                       const std::vector<std::vector<FMOcc<FMPosSFR>>>& mPerRead,
                       const vector<pair<string, string>>& reads,
-                      FMIndexDBG<FMPosSFR>& index);
+                      bool& firstChunk, ofstream& f2);
 
 double findMedian(vector<length_t> a, int n);
 
 template <class T, class positionClass>
-double doBenchSFI(vector<pair<string, string>>& reads, T& mapper,
-                  SearchStrategyDBG<T, positionClass>* strategy,
+double doBenchSFI(T& mapper, SearchStrategyDBG<T, positionClass>* strategy,
                   string readsFile, length_t ED, string cpSparse,
                   std::string outputFile = "");
 
-double doBenchSFR(vector<pair<string, string>>& reads,
-                  FMIndexDBG<FMPosSFR>& mapper,
+double doBenchSFR(FMIndexDBG<FMPosSFR>& mapper,
                   SearchStrategyDBG<FMIndexDBG<FMPosSFR>, FMPosSFR>* strategy,
                   string readsFile, length_t ED, std::string cpSparse,
                   std::string outputFile = "");

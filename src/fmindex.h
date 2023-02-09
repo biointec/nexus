@@ -28,6 +28,7 @@
 #include "buildIndexAuxiliary.h"
 #include "bwtrepr.h"
 #include "cluster.h"
+#include "encodedtext.h"
 #include "search.h"
 #include "suffixarray.h"
 #include "textoccurrence.h"
@@ -63,7 +64,7 @@ template <class positionClass> class FMIndex {
     // The length of the reference text
     length_t textLength;
     // The reference text
-    std::string text;
+    EncodedText<ALPHABET> text;
 
     // The number of separation characters
     int numberOfSeparationCharacters = 1;
@@ -74,9 +75,9 @@ template <class positionClass> class FMIndex {
     // bidirectional FM-index data structures
 
     // the bwt string of the reference genome
-    std::string bwt;
+    EncodedText<ALPHABET> bwt;
     // the bwt string of the reverse reference genome
-    std::string revbwt;
+    EncodedText<ALPHABET> revbwt;
     // the counts array of the reference genome
     std::vector<length_t> counts;
     // the (sparse) suffix array of the reference genome
@@ -148,8 +149,10 @@ template <class positionClass> class FMIndex {
      *
      * @param baseFile the baseFile of the files that will be read in
      * @param verbose if true the steps will be written to cout
+     * @param strainFree bool indicating whether strainfree matching is required
      */
-    void fromFiles(const std::string& baseFile, bool verbose);
+    void fromFiles(const std::string& baseFile, bool verbose,
+                   bool strainFree = false);
 
     /**
      * @brief Read a binary file and stores content in array (e.g. suffix array)
@@ -204,17 +207,6 @@ template <class positionClass> class FMIndex {
     // ----------------------------------------------------------------------------
     // ROUTINES FOR ACCESSING DATA STRUCTURE
     // ----------------------------------------------------------------------------
-
-    /**
-     * @brief Finds the LF mapping of the character at index k in the bwt string
-     *
-     * @param k the index to find the LF mapping of
-     * @param reversed Only present for backwards compatibility. Throws an error
-     * if true. Defaults to false.
-     * @return length_t - the row that is the LF mapping of k. It is so that the
-     * entry in the suffix array of this return value is one less than the entry
-     * in the suffix array at index k
-     */
 
     /**
      * @brief Finds the LF mapping of the character at index k in the (reverse)
@@ -315,40 +307,6 @@ template <class positionClass> class FMIndex {
     Range matchString(const std::string& s);
 
     // ----------------------------------------------------------------------------
-    // HELP ROUTINES FOR APPROXIMATE PATTERN MATCHING
-    // ----------------------------------------------------------------------------
-
-    /**
-     * @brief Find the ranges of cP using the principle explained in the paper
-     * of Lahm
-     *
-     * @param positionInAlphabet the position in the alphabet of the character
-     * that is added in the front
-     * @param rangesOfP the ranges of pattern P
-     * @param childRanges the ranges cP, this will be overwritten
-     * @return true if the new ranges are not empty
-     * @return false otherwise
-     */
-    bool findRangesWithExtraCharBackward(length_t positionInAlphabet,
-                                         const SARangePair& rangesOfP,
-                                         SARangePair& childRanges) const;
-
-    /**
-     * @brief Find the ranges of Pc using the principle explained in the paper
-     * of Lahm
-     *
-     * @param positionInAlphabet the position in the alphabet of the character
-     * that is added in the back
-     * @param rangesOfP the ranges of pattern P
-     * @param childRanges the ranges Pc, this will be overwritten
-     * @return true if the new ranges are not empty
-     * @return false otherwise
-     */
-    bool findRangesWithExtraCharForward(length_t positionInAlphabet,
-                                        const SARangePair& rangesOfP,
-                                        SARangePair& childRanges) const;
-
-    // ----------------------------------------------------------------------------
     // HELPER ROUTINES FOR APPROXIMATE MATCHING (ITERATIVELY)
     // ----------------------------------------------------------------------------
 
@@ -368,7 +326,7 @@ template <class positionClass> class FMIndex {
      * @param lowerBound the lowerbound for this partition
      * @param descendantsOtherD the descendants of the other direction, defaults
      * to empty vector
-     * @param initEdsOtherDthe initialization eds of the other direction,
+     * @param initEdsOtherD the initialization eds of the other direction,
      * defaults to empty vector
      * @param remainingDesc the remaining descendants on the current branch,
      * that are already created but aren't checked yet and need to be checked
@@ -444,7 +402,7 @@ template <class positionClass> class FMIndex {
     /**
      * Updates the node path stacks according to the current position. The new
      * path is always either a subpath of the current path or the current path
-     * wiht one extra node. The entire path is reversed(leftNodes) + rightNodes
+     * with one extra node. The entire path is reversed(leftNodes) + rightNodes
      * @param pos the current position
      * @param leftNodes the left nodepath (from origin to leftmost point)
      * @param rightNodes the right node path (from origin to rightmost point)
@@ -470,7 +428,7 @@ template <class positionClass> class FMIndex {
      */
     bool extendFMPosIntermediary(const SARangePair& parentRanges,
                                  std::vector<FMPosExt<positionClass>>& stack,
-                                 int row, length_t i, int trueDepth = -1);
+                                 int row, length_t i, int trueDepth = -1) const;
 
     /**
      * @brief Pushes all the children corresponding to the node with ranges
@@ -484,7 +442,7 @@ template <class positionClass> class FMIndex {
      */
     virtual void extendFMPos(const SARangePair& ranges,
                              std::vector<FMPosExt<positionClass>>& stack,
-                             int row = 0, int trueDepth = -1);
+                             int row = 0, int trueDepth = -1) const;
 
     /**
      * @brief Pushes all the children corresponding to the this position onto
@@ -494,7 +452,7 @@ template <class positionClass> class FMIndex {
      * @param stack the stack to push the children on
      */
     virtual void extendFMPos(const positionClass& pos,
-                             std::vector<FMPosExt<positionClass>>& stack);
+                             std::vector<FMPosExt<positionClass>>& stack) const;
 
     /**
      * @brief Converts a match in the suffix array to matches in the text
@@ -568,11 +526,14 @@ template <class positionClass> class FMIndex {
      * @param sa_sparse sparseness factor of suffix array. It is assumed this is
      * a power of two
      * @param verbose will write to cout
+     * @param strainFree bool indicating whether strain free matching is
+     * required
      */
-    FMIndex(const std::string& baseFile, int sa_sparse = 1, bool verbose = true)
+    FMIndex(const std::string& baseFile, int sa_sparse = 1, bool verbose = true,
+            bool strainFree = false)
         : baseFile(baseFile), sparseSA(baseFile, sa_sparse) {
         // read in files
-        fromFiles(baseFile, verbose);
+        fromFiles(baseFile, verbose, strainFree);
 
         // populate table
         populateTable(verbose);
@@ -605,11 +566,11 @@ template <class positionClass> class FMIndex {
     /**
      * @brief Get a reference to the original text
      *
-     * @return const std::string& - a reference to the original text
+     * @return const EncodedText<ALPHABET>& - a reference to the original text
      */
-    const std::string& getText() {
+    const EncodedText<ALPHABET>& getText() {
         if (text.empty()) {
-            if (!readText(baseFile + ".txt", text)) {
+            if (!text.read(baseFile + ".compressed.txt")) {
                 throw std::runtime_error("Problem reading: " + baseFile +
                                          ".txt");
             }
@@ -696,6 +657,33 @@ template <class positionClass> class FMIndex {
         return SARangePair();
     }
 
+    /**
+     * @brief Get the text length
+     *
+     * @return length_t - text length
+     */
+    const length_t& getTextLength() const {
+        return textLength;
+    }
+
+    /**
+     * @brief Get the counts
+     *
+     * @return std::vector<length_t>& - counts
+     */
+    const std::vector<length_t>& getCounts() const {
+        return counts;
+    }
+
+    /**
+     * @brief Get the alphabet
+     *
+     * @return const Alphabet<ALPHABET> - the alphabet
+     */
+    const Alphabet<ALPHABET> getSigma() const {
+        return sigma;
+    }
+
     // ----------------------------------------------------------------------------
     // ROUTINES FOR EXACT MATCHING
     // ----------------------------------------------------------------------------
@@ -775,6 +763,40 @@ template <class positionClass> class FMIndex {
     }
 
     // ----------------------------------------------------------------------------
+    // HELP ROUTINES FOR APPROXIMATE PATTERN MATCHING
+    // ----------------------------------------------------------------------------
+
+    /**
+     * @brief Find the ranges of cP using the principle explained in the paper
+     * of Lam
+     *
+     * @param positionInAlphabet the position in the alphabet of the character
+     * that is added in the front
+     * @param rangesOfP the ranges of pattern P
+     * @param childRanges the ranges cP, this will be overwritten
+     * @return true if the new ranges are not empty
+     * @return false otherwise
+     */
+    bool findRangesWithExtraCharBackward(length_t positionInAlphabet,
+                                         const SARangePair& rangesOfP,
+                                         SARangePair& childRanges) const;
+
+    /**
+     * @brief Find the ranges of Pc using the principle explained in the paper
+     * of Lam
+     *
+     * @param positionInAlphabet the position in the alphabet of the character
+     * that is added in the back
+     * @param rangesOfP the ranges of pattern P
+     * @param childRanges the ranges Pc, this will be overwritten
+     * @return true if the new ranges are not empty
+     * @return false otherwise
+     */
+    bool findRangesWithExtraCharForward(length_t positionInAlphabet,
+                                        const SARangePair& rangesOfP,
+                                        SARangePair& childRanges) const;
+
+    // ----------------------------------------------------------------------------
     // ROUTINES FOR APPROXIMATE MATCHING
     // ----------------------------------------------------------------------------
 
@@ -793,7 +815,7 @@ template <class positionClass> class FMIndex {
                                                    length_t maxED);
 
     /**
-     * @brief Private elper function for the naive approximate pattern matching
+     * @brief Private helper function for the naive approximate pattern matching
      * method
      *
      * @param pattern the pattern to match
@@ -838,7 +860,7 @@ template <class positionClass> class FMIndex {
      * for eliminating redundancy in the edit distance metric
      *
      * @param search the search to follow
-     * @param startMatch the approximate match found for all previous partions
+     * @param startMatch the approximate match found for all previous partitions
      * of the search
      * @param occ a vector with matches of the complete search, if such a match
      * is found is a pushed upon this vector
@@ -878,7 +900,7 @@ template <class positionClass> class FMIndex {
      * to start a search for the next part
      *
      * @param s the search to follow
-     * @param startMatch the approximate match found for all previous partions
+     * @param startMatch the approximate match found for all previous partitions
      * of the search
      * @param occ a vector with matches of the complete search, if such a match
      * is found is a pushed upon this vector

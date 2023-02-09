@@ -24,8 +24,11 @@
 #define BANDMATRIX_H
 
 #include <algorithm> // used for reversing CIGAR string
-#include <cmath>     // used for taking the log
-#include <iostream>  // used for printing (debugging reasons)
+#include <array>
+#include <cassert>
+#include <cmath>    // used for taking the log
+#include <iostream> // used for printing (debugging reasons)
+#include <vector>
 
 #include "substring.h"
 
@@ -498,7 +501,7 @@ class BitParallelED {
      * Find the minimum edit distance value and its position in a row
      * @param i Row index
      * @param jMin Column index at which minimum value is found (output)
-     * @param minScore Mimumum value (output)
+     * @param minScore Minimum value (output)
      */
     void findMinimumAtRow(uint i, uint& jMin, uint& minScore) const {
         jMin = getFirstColumn(i);

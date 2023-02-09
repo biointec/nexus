@@ -61,7 +61,7 @@ bool FMPos::compare(const FMOcc<FMPos>& rhs, int distance,
                     length_t shift) const {
     if (getRanges().getRangeSA().getBegin() !=
         rhs.getRanges().getRangeSA().getBegin()) {
-        // the positions do not beging at the same position, first position is
+        // the positions do not begin at the same position, first position is
         // smaller
         return getRanges().getRangeSA().getBegin() <
                rhs.getRanges().getRangeSA().getBegin();
@@ -93,11 +93,11 @@ ExtendFMPosAboveKPtr FMPosSFR::ExtendFMPosAboveK;
 AddCharAboveKPtr FMPosSFR::AddCharAboveK;
 
 void FMPosSFR::changeNodeRepresentation() {
-    // Get the left boundary of the SA interval of the match
-    length_t lb = ranges.getRangeSA().getBegin();
+    // Get the right boundary of the SA interval of the match
+    length_t rb = ranges.getRangeSA().getEnd();
     // Find the first node of the path
     uint32_t id, l;
-    ((FMIndexDBG<FMPosSFR>*)index)->findID(lb, id, l);
+    ((FMIndexDBG<FMPosSFR>*)index)->findID(rb, id, l);
     // Add the node to the path
     appendToNodePath(id);
     // this is also the final node on the left (no left extension has happened
@@ -148,7 +148,10 @@ void FMPosSFR::extendFMPosAboveKBackward(
     if (indexInSA != node.left_kmer_forward) {
         // We can add a character whilst staying in the current front node
         // Get the character that was added
-        char c = ((FMIndexDBG<FMPosSFR>*)index)->bwt[indexInSA];
+
+        uint64_t bwtSymbol = ((FMIndexDBG<FMPosSFR>*)index)->bwt[indexInSA];
+        char c = ((FMIndexDBG<FMPosSFR>*)index)->sigma.i2c(bwtSymbol);
+
         // Check that it is no separation character
         if (!(c == '$' || c == '%')) {
             // Push this position onto the stack, along with the character that
@@ -239,7 +242,10 @@ void FMPosSFR::extendFMPosAboveKForward(
     if (indexInRevSA != node.right_kmer_reverse) {
         // We can add a character whilst staying in the current end node
         // Get the character that was added
-        char c = ((FMIndexDBG<FMPosSFR>*)index)->revbwt[indexInRevSA];
+        uint64_t bwtSymbol =
+            ((FMIndexDBG<FMPosSFR>*)index)->revbwt[indexInRevSA];
+        char c = ((FMIndexDBG<FMPosSFR>*)index)->sigma.i2c(bwtSymbol);
+
         // Check that it is no separation character
         if (!(c == '$' || c == '%')) {
             // Push this position onto the stack, along with the character that
@@ -327,7 +333,9 @@ bool FMPosSFR::addCharAboveKBackward(const char& c) {
         // We can add a character whilst staying in the current front node
         // Check if the next character in the current front node is equal to the
         // character c we want to add
-        if (((FMIndexDBG<FMPosSFR>*)index)->bwt[indexInSA] != c) {
+        uint64_t bwtSymbol = ((FMIndexDBG<FMPosSFR>*)index)->bwt[indexInSA];
+        char character = ((FMIndexDBG<FMPosSFR>*)index)->sigma.i2c(bwtSymbol);
+        if (character != c) {
             // The characters are not equal, so character c cannot be added. To
             // indicate that this position is invalid, we set the ranges to
             // empty.
@@ -356,7 +364,7 @@ bool FMPosSFR::addCharAboveKBackward(const char& c) {
         // Hence, we need to investigate the possible predecessors of the front
         // node.
 
-        // Get the index in alfabet sigma that corresponds to character c
+        // Get the index in alphabet sigma that corresponds to character c
         int posInAlphabet =
             ((FMIndexDBG<FMPosSFR>*)index)->sigma.c2i((unsigned char)c);
         // Check that this index is valid
@@ -395,7 +403,7 @@ bool FMPosSFR::addCharAboveKBackward(const char& c) {
                 return true;
             }
         }
-        // The index in alfabet sigma is not valid or there exists no
+        // The index in alphabet sigma is not valid or there exists no
         // predecessor that is the result of the extension of the current match
         // with character c. To indicate that this position is invalid, we set
         // the ranges to empty.
@@ -415,7 +423,10 @@ bool FMPosSFR::addCharAboveKForward(const char& c) {
         // We can add a character whilst staying in the current end node
         // Check if the next character in the current end node is equal to the
         // character c we want to add
-        if (((FMIndexDBG<FMPosSFR>*)index)->revbwt[indexInRevSA] != c) {
+        uint64_t bwtSymbol =
+            ((FMIndexDBG<FMPosSFR>*)index)->revbwt[indexInRevSA];
+        char charac = ((FMIndexDBG<FMPosSFR>*)index)->sigma.i2c(bwtSymbol);
+        if (charac != c) {
             // The characters are not equal, so character c cannot be added. To
             // indicate that this position is invalid, we set the ranges to
             // empty.
@@ -444,7 +455,7 @@ bool FMPosSFR::addCharAboveKForward(const char& c) {
         // Hence, we need to investigate the possible successors of the end
         // node.
 
-        // Get the index in alfabet sigma that corresponds to character c
+        // Get the index in alphabet sigma that corresponds to character c
         int posInAlphabet =
             ((FMIndexDBG<FMPosSFR>*)index)->sigma.c2i((unsigned char)c);
         // Check that this index is valid
@@ -482,7 +493,7 @@ bool FMPosSFR::addCharAboveKForward(const char& c) {
                 return true;
             }
         }
-        // The index in alfabet sigma is not valid or there exists no
+        // The index in alphabet sigma is not valid or there exists no
         // successor that is the result of the extension of the current match
         // with character c. To indicate that this position is invalid, we set
         // the ranges to empty.
@@ -519,7 +530,7 @@ const bool FMPosSFR::separationIsNext() const {
     for (int i = 0;
          i < ((FMIndexDBG<FMPosSFR>*)index)->numberOfSeparationCharacters;
          i++) {
-        // Find the separation character that corresponds to index i in alfabet
+        // Find the separation character that corresponds to index i in alphabet
         // sigma.
         unsigned char c = ((FMIndexDBG<FMPosSFR>*)index)->sigma.i2c(i);
         // Create a copy of the current position to execute the character adding

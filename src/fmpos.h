@@ -270,8 +270,8 @@ class FMPosSFR : public FMPos {
     // Pointer to The node path in the graph that represents the current match
     std::shared_ptr<std::vector<uint32_t>> ptrToNodePath;
 
-    uint32_t finalNodeLeft;  // the final node of the path on the left side
-    uint32_t finalNodeRight; // the final node of the path on the right side
+    uint32_t finalNodeLeft = 0;  // the final node of the path on the left side
+    uint32_t finalNodeRight = 0; // the final node of the path on the right side
     uint32_t numberOfNodesLeft = 0;  // the number of nodes on the left side
     uint32_t numberOfNodesRight = 0; // the number of nodes on the right side
 

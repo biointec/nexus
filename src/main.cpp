@@ -60,29 +60,6 @@ int editDistDP(string P, string O, int maxED) {
     return mat(m, n);
 }
 
-void printMatches(vector<TextOccurrence> matches, string text, bool printLine,
-                  string duration, FMIndex<FMPos>& mapper, string name) {
-
-    cout << endl;
-
-    cout << name << ":\tduration: " << duration
-         << "µs\t nodes visited: " << mapper.getNodes()
-         << "\t matrix elements written: " << mapper.getMatrixElements()
-         << "\t startpositions reported: " << mapper.getTotalReported()
-         << " #matches: " << matches.size() << endl;
-
-    for (auto match : matches) {
-        cout << "Found match at position " << match.getRange().getBegin()
-             << " with ED " << match.getDistance() << endl;
-
-        cout << "\tCorresponding substring:\t"
-             << text.substr(match.getRange().getBegin(),
-                            match.getRange().getEnd() -
-                                match.getRange().getBegin())
-             << endl;
-    }
-}
-
 string getFileExt(const string& s) {
 
     size_t i = s.rfind('.', s.length());
@@ -270,8 +247,8 @@ void doBench(vector<pair<string, string>>& reads, FMIndex<T>& mapper,
     size_t allReportedMatches = 0;
     size_t totalUniqueMatches = 0;
     size_t mappedReads = 0;
-    size_t mappedReadsForward = 0;
-    size_t mappedReadsBackward = 0;
+    // size_t mappedReadsForward = 0;
+    // size_t mappedReadsBackward = 0;
 
     cout << "Benchmarking with " << strategy->getName()
          << " strategy for max distance " << ED << " with "
@@ -305,7 +282,7 @@ void doBench(vector<pair<string, string>>& reads, FMIndex<T>& mapper,
         totalMatrixElements += mapper.getMatrixElements();
         allReportedMatches += mapper.getTotalReported();
         totalUniqueMatches += matches.size();
-        mappedReadsForward += !matches.empty();
+        // mappedReadsForward += !matches.empty();
 
         // do the same for the reverse complement
         vector<TextOccurrence> matchesRevCompl =
@@ -314,67 +291,15 @@ void doBench(vector<pair<string, string>>& reads, FMIndex<T>& mapper,
         totalMatrixElements += mapper.getMatrixElements();
         allReportedMatches += +mapper.getTotalReported();
         totalUniqueMatches += matchesRevCompl.size();
-        mappedReadsBackward += !matchesRevCompl.empty();
+        // mappedReadsBackward += !matchesRevCompl.empty();
 
         mappedReads += !(matchesRevCompl.empty() && matches.empty());
 
         matchesPerRead.push_back(matches);
         matchesPerRead.push_back(matchesRevCompl);
         numberMatchesPerRead.push_back(matches.size() + matchesRevCompl.size());
-        // correctness check, comment this out if you want to check
-        // For each reported match the reported edit distance is checked and
-        // compared to a recalculated value using a single banded matrix this
-        // is slow WARNING: this checks the EDIT DISTANCE, for it might be that
-        // the hamming distance is higher
-        /*for (auto match : matches) {
-
-            string O = text.substr(match.getRange().getBegin(),
-                                   match.getRange().getEnd() -
-                                       match.getRange().getBegin());
-
-            int trueED = editDistDP(read, O, ED);
-            int foundED = match.getDistance();
-            if (foundED != trueED) {
-                cout << i << "\n";
-                cout << "Wrong ED!!"
-                     << "\n";
-                cout << "P: " << read << "\n";
-                cout << "O: " << O << "\n";
-                cout << "true ED " << trueED << ", found ED " << foundED <<
-        "\n"
-                     << match.getRange().getBegin() << "\n";
-            }
-        }*/
-
-        // this block checks if at least one occurrence is found and if the
-        // identifier is a number and then checks if this position is found as
-        // a match (for checking correctness) if you want to check if the
-        // position is found as a match make sure that the identifier of the
-        // read is the position. Out comment this block for the check
-        /*  bool originalFound = true;
-          try {
-              length_t pos = stoull(originalPos);
-              originalFound = false;
-
-              for (auto match : matches) {
-
-                  if (match.getRange().getBegin() >= pos - (ED + 2) &&
-                      match.getRange().getBegin() <= pos + (ED + 2)) {
-                      originalFound = true;
-                      break;
-                  }
-              }
-          } catch (const std::exception& e) {
-              // nothing to do, identifier is  not the orignal position
-          }
-
-          // check if at least one occurrence was found (for reads that were
-          // sampled from actual reference) Out-cooment this block if you want
-          // to do this.
-          if (matches.size() == 0 || (!originalFound)) {
-              cout << "Could not find occurrence for " << originalPos << endl;
-          }*/
     }
+
     auto finish = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed = finish - start;
     cout << "Progress: " << reads.size() << "/" << reads.size() << "\n";
@@ -399,11 +324,12 @@ void doBench(vector<pair<string, string>>& reads, FMIndex<T>& mapper,
          << findMedian(numberMatchesPerRead, numberMatchesPerRead.size())
          << endl;
 
-    writeToOutput(readsFile + "_output.txt", matchesPerRead, reads);
+    writeToOutput(readsFile + "_output.tsv", matchesPerRead, reads);
 }
 
 void showUsage() {
-    cout << "Usage: ./columba [options] basefilename readfile.[ext]\n\n";
+    cout
+        << "Usage: ./columba [options] <basefilename> <k> <readfile.[ext]>\n\n";
     cout << " [options]\n";
     cout << "  -e  --max-ed\t\tmaximum edit distance [default = 0]\n";
     cout << "  -s  --sa-sparseness\tsuffix array sparseness factor "
@@ -439,6 +365,68 @@ void showUsage() {
     cout << "\t<base filename>.rev.brt: Prefix occurrence table of the "
             "reverse "
             "of T\n";
+    cout <<
+
+        "This program aligns short, single end reads to a pan-genome in the\n"
+        "form of a linear concatenation. It reports the corresponding\n"
+        "coordinates in the original genomes.\n\n\n"
+
+        "Usage: ./columba [options] <basefilename> <readfile.[ext]>\n\n"
+
+        " Following input parameters are required:\n"
+        "  <basefilename>      base filename of the input index\n"
+        "  <readfile.[ext]>    the file containing the input reads to be\n"
+        "                      aligned (single end).\n\n"
+
+        " [ext]\n"
+        "  one of the following: fq, fastq, FASTA, fasta, fa\n\n\n"
+
+        " [options]\n"
+        "  -e/--max-ed         maximum edit distance [default = 0]\n\n"
+
+        "  -s/--sa-sparseness  suffix array sparseness factor [default = "
+        "16]\n\n"
+
+        "  -p/--partitioning   Add flag to do uniform/static/dynamic\n"
+        "                      partitioning of the seeds for search schemes.\n"
+        "                      Dynamic partitioning cannot be used with\n"
+        "                      strain-free matching. [default = dynamic]\n\n"
+
+        "  -m/--metric         Add flag to set distance metric (editnaive/\n"
+        "                      editopt/ hamming) [default = editopt]\n\n"
+
+        "  -ss/--search-scheme Choose the search scheme. Options:\n"
+        "                       * kuch1    Kucherov k + 1 [default]\n"
+        "                       * kuch2    Kucherov k + 2\n"
+        "                       * kianfar  Optimal Kianfar scheme\n"
+        "                       * manbest  Manual best improvement for "
+        "Kianfar\n"
+        "                                  scheme (only for ed = 4)\n"
+        "                       * pigeon   Pigeonhole scheme\n"
+        "                       * 01*0     01*0 search scheme\n"
+        "                       * naive    naive backtracking\n"
+        "                       * custom   custom search scheme, the next\n"
+        "                                  parameter should be a path to the\n"
+        "                                  folder containing this "
+        "searchscheme\n\n\n"
+
+        " Following input files are required:\n"
+        "  <basefilename>.compressed.txt:           compressed version of the\n"
+        "                                           input text T\n\n"
+        "  <basefilename>.cct:                      character counts table\n\n"
+        "  <basefilename>.sa.<saSF>:                sparse suffix array, with\n"
+        "                                           suffix array sparseness\n"
+        "                                           factor <saSF> elements\n\n"
+        "  <basefilename>.sa.bv.<saSF>:             bitvector indicating "
+        "which\n"
+        "                                           elements of the suffix\n"
+        "                                           array are stored.\n\n"
+        "  <basefilename>.bwt:                      BWT of T\n\n"
+        "  <basefilename>.rev.bwt:                  BWT of the reverse of T\n\n"
+        "  <basefilename>.brt:                      Prefix occurrence table of "
+        "T\n\n"
+        "  <basefilename>.rev.brt:                  Prefix occurrence table "
+        "of\n\n\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -541,7 +529,7 @@ int main(int argc, char* argv[]) {
 
         else {
             cerr << "Unknown argument: " << arg << " is not an option" << endl;
-            return false;
+            return EXIT_FAILURE;
         }
     }
 

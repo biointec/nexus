@@ -27,7 +27,7 @@
 
 #define Pattern std::vector<int>
 
-// An enum for partion strategy
+// An enum for partition strategy
 enum PartitionStrategy { UNIFORM, STATIC, DYNAMIC };
 // An enum for which distance metric to use
 enum DistanceMetric { HAMMING, EDITNAIVE, EDITOPTIMIZED };
@@ -448,18 +448,18 @@ template <class T, class positionClass> class SearchStrategy {
     /**
      * Retrieves the text of the index (for debugging purposes)
      */
-    std::string getText() const {
+    EncodedText<ALPHABET> getText() const {
         return index.getText();
     }
 
     /**
-     * Mathces a pattern approximately using this strategy
+     * Matches a pattern approximately using this strategy
      * @param pattern, the pattern to match
      * @param maxED, the maximal allowed edit distance (or  hamming
      * distance)
      */
-    virtual std::vector<TextOccurrence> matchApprox(const std::string& pattern,
-                                                    length_t maxED) const;
+    std::vector<TextOccurrence> matchApprox(const std::string& pattern,
+                                            length_t maxED) const;
 
     length_t getNodes() const {
         return index.getNodes();
@@ -503,7 +503,7 @@ class SearchStrategyDBG : virtual public SearchStrategy<T, positionClass> {
           strainFree(index.isStrainFree()) {
     }
 
-    virtual std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>
+    std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>
     matchApproxSFI(const std::string& pattern, length_t maxED) const;
 };
 
@@ -601,7 +601,7 @@ class CustomSearchStrategy : virtual public SearchStrategy<T, positionClass> {
         &CustomSearchStrategy::getWeightsDefault,
         &CustomSearchStrategy::getWeightsDefault,
         &CustomSearchStrategy::getWeightsDefault}; // pointer to the correct
-                                                   // getWeigths() function,
+                                                   // getWeights() function,
                                                    // either default or custom
 
     /**
@@ -761,11 +761,12 @@ class CustomSearchStrategy : virtual public SearchStrategy<T, positionClass> {
         getSearchSchemeFromFolder(pathToFolder, verbose);
     }
 
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         assert(supportsMaxScore[maxED - 1]);
         return schemePerED[maxED - 1][0].getNumParts();
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         assert(supportsMaxScore[maxED - 1]);
         return schemePerED[maxED - 1];
     }
@@ -775,11 +776,12 @@ template <class T, class positionClass>
 class CustomSearchStrategyDBG : public SearchStrategyDBG<T, positionClass>,
                                 public CustomSearchStrategy<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return CustomSearchStrategy<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return CustomSearchStrategy<T, positionClass>::createSearches(maxED);
     }
 
@@ -805,10 +807,11 @@ class NaiveBackTrackingStrategy
     : virtual public SearchStrategy<T, positionClass> {
   protected:
     std::vector<Search> searches = {};
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return 1;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return searches;
     }
 
@@ -845,12 +848,13 @@ class NaiveBackTrackingStrategyDBG
     : public SearchStrategyDBG<T, positionClass>,
       public NaiveBackTrackingStrategy<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return NaiveBackTrackingStrategy<T, positionClass>::calculateNumParts(
             maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return NaiveBackTrackingStrategy<T, positionClass>::createSearches(
             maxED);
     }
@@ -861,16 +865,18 @@ class NaiveBackTrackingStrategyDBG
 
         SearchStrategy<T, positionClass>::index.resetCounters();
         if (maxED == 0) {
-
-            auto result =
-                SearchStrategy<T, positionClass>::index.ExactMatchSFI(pattern);
-            std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>
-                paths;
-            for (auto occ : result) {
-                occ.generateOutput();
-                paths[occ.getNodePath()].emplace_back(occ);
+            SARangePair finalRange = SearchStrategy<T, positionClass>::index
+                                         .matchStringBidirectionally(pattern);
+            if (!finalRange.empty()) {
+                positionClass finalPos =
+                    positionClass(finalRange, pattern.size(), pattern.size());
+                FMOcc<positionClass> finalOcc(finalPos, 0);
+                std::vector<FMOcc<positionClass>> occs = {finalOcc};
+                return SearchStrategy<T, positionClass>::index
+                    .mapOccurrencesInSAToOccurrencesInTextSFI(occs, maxED);
+            } else {
+                return {};
             }
-            return paths;
         }
         return SearchStrategy<T, positionClass>::index.approxMatchesNaiveSFI(
             pattern, maxED);
@@ -925,10 +931,11 @@ class KucherovKplus1 : virtual public SearchStrategy<T, positionClass> {
 
     const std::vector<std::vector<double>> staticPositions = {
         {0.5}, {0.41, 0.7}, {0.25, 0.50, 0.75}, {0.27, 0.47, 0.62, 0.81}};
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 1;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         assert(maxED >= 1);
         assert(maxED <= 4);
 
@@ -961,11 +968,12 @@ template <class T, class positionClass>
 class KucherovKplus1DBG : public SearchStrategyDBG<T, positionClass>,
                           public KucherovKplus1<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return KucherovKplus1<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return KucherovKplus1<T, positionClass>::createSearches(maxED);
     }
 
@@ -1020,10 +1028,11 @@ class KucherovKplus2 : virtual public SearchStrategy<T, positionClass> {
 
     const std::vector<std::vector<Search>> schemePerED = {ED1, ED2, ED3, ED4};
 
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 2;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return schemePerED[maxED - 1];
     }
 
@@ -1068,11 +1077,12 @@ template <class T, class positionClass>
 class KucherovKplus2DBG : public SearchStrategyDBG<T, positionClass>,
                           public KucherovKplus2<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return KucherovKplus2<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return KucherovKplus2<T, positionClass>::createSearches(maxED);
     }
 
@@ -1115,10 +1125,11 @@ class OptimalKianfar : virtual public SearchStrategy<T, positionClass> {
 
     const std::vector<std::vector<double>> staticPositions = {
         {0.5}, {0.30, 0.60}, {0.17, 0.69, 0.96}, {0.2, 0.5, 0.6, 0.8}};
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 1;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         if (maxED < 1 || maxED > 5) {
             throw std::invalid_argument("max ED should be between 1 and 4");
         }
@@ -1152,11 +1163,12 @@ template <class T, class positionClass>
 class OptimalKianfarDBG : public SearchStrategyDBG<T, positionClass>,
                           public OptimalKianfar<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return OptimalKianfar<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return OptimalKianfar<T, positionClass>::createSearches(maxED);
     }
 
@@ -1176,9 +1188,9 @@ class OptimalKianfarDBG : public SearchStrategyDBG<T, positionClass>,
 // A concrete derived class of SearchStrategy. The strategy here is founded
 // on this observation: if x errors are allowed and the pattern is divided
 // up in (x
-// + 2) parts then every match with max x erros contains a seed consisting
+// + 2) parts then every match with max x errors contains a seed consisting
 // of n parts, where the first and last part of the seed contain no errors
-// and all parts inbetween these contain exacly one error. (2 <= n <= x +
+// and all parts in between these contain exactly one error. (2 <= n <= x +
 // 2)
 template <class T, class positionClass>
 class O1StarSearchStrategy : virtual public SearchStrategy<T, positionClass> {
@@ -1212,10 +1224,11 @@ class O1StarSearchStrategy : virtual public SearchStrategy<T, positionClass> {
 
     const std::vector<std::vector<Search>> schemePerED = {ED1, ED2, ED3, ED4};
 
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 2;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return schemePerED[maxED - 1];
     }
 
@@ -1258,11 +1271,12 @@ template <class T, class positionClass>
 class O1StarSearchStrategyDBG : public SearchStrategyDBG<T, positionClass>,
                                 public O1StarSearchStrategy<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return O1StarSearchStrategy<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return O1StarSearchStrategy<T, positionClass>::createSearches(maxED);
     }
 
@@ -1290,10 +1304,11 @@ class ManBestStrategy : virtual public SearchStrategy<T, positionClass> {
         Search::makeSearch({5, 4, 3, 2, 1, 0}, {0, 0, 0, 0, 3, 3},
                            {0, 0, 4, 4, 4, 4})};
 
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 2;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         assert(maxED == 4);
         return ED4;
     }
@@ -1334,11 +1349,12 @@ template <class T, class positionClass>
 class ManBestStrategyDBG : public SearchStrategyDBG<T, positionClass>,
                            public ManBestStrategy<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return ManBestStrategy<T, positionClass>::calculateNumParts(maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return ManBestStrategy<T, positionClass>::createSearches(maxED);
     }
 
@@ -1389,10 +1405,11 @@ class PigeonHoleSearchStrategy
         Search::makeSearch({4, 3, 2, 1, 0}, {0, 0, 0, 0, 0}, {0, 4, 4, 4, 4})};
 
     const std::vector<std::vector<Search>> schemePerED = {ED1, ED2, ED3, ED4};
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return maxED + 1;
     }
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return schemePerED[maxED - 1];
     }
 
@@ -1409,12 +1426,13 @@ class PigeonHoleSearchStrategyDBG
     : public SearchStrategyDBG<T, positionClass>,
       public PigeonHoleSearchStrategy<T, positionClass> {
   private:
-    int calculateNumParts(unsigned int maxED) const {
+    virtual int calculateNumParts(unsigned int maxED) const override {
         return PigeonHoleSearchStrategy<T, positionClass>::calculateNumParts(
             maxED);
     }
 
-    const std::vector<Search>& createSearches(unsigned int maxED) const {
+    virtual const std::vector<Search>&
+    createSearches(unsigned int maxED) const override {
         return PigeonHoleSearchStrategy<T, positionClass>::createSearches(
             maxED);
     }

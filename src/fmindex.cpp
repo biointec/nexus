@@ -56,7 +56,23 @@ thread_local ExtraCharPtr<positionClass> FMIndex<positionClass>::extraChar;
 // ----------------------------------------------------------------------------
 
 template <class positionClass>
-void FMIndex<positionClass>::fromFiles(const string& baseFile, bool verbose) {
+void FMIndex<positionClass>::fromFiles(const string& baseFile, bool verbose,
+                                       bool strainFree) {
+
+    if (verbose) {
+
+        // read the text
+        cout << "Reading " << baseFile << ".compressed.txt"
+             << "...";
+        cout.flush();
+    }
+
+    if (!text.read(baseFile + ".compressed.txt")) {
+        throw runtime_error("Problem reading: " + baseFile + ".txt");
+    }
+
+    textLength = text.size();
+    // (text[text.size() - 1] == '\n') ? text.size() - 1 : text.size();
     if (verbose) {
         cout << "Reading in files with baseFile " << baseFile << endl;
 
@@ -74,6 +90,7 @@ void FMIndex<positionClass>::fromFiles(const string& baseFile, bool verbose) {
 
     // TODO why not in construction process?
     length_t cumCount = 0; // cumulative character counts
+    counts.clear();
     for (size_t i = 0; i < charCounts.size(); i++) {
         if (charCounts[i] == 0)
             continue;
@@ -86,11 +103,9 @@ void FMIndex<positionClass>::fromFiles(const string& baseFile, bool verbose) {
         // read the BWT
         cout << "Reading " << baseFile << ".bwt" << endl;
     }
-    if (!readText(baseFile + ".bwt", bwt)) {
+    if (!bwt.read(baseFile + ".bwt")) {
         throw runtime_error("Cannot open file: " + baseFile + ".bwt");
     }
-
-    textLength = (bwt[bwt.size() - 1] == '\n') ? bwt.size() - 1 : bwt.size();
 
     if (verbose) {
         cout << "Done reading BWT (size: " << bwt.size() << ")" << endl;
@@ -98,8 +113,10 @@ void FMIndex<positionClass>::fromFiles(const string& baseFile, bool verbose) {
         // read the reverse BWT
         cout << "Reading " << baseFile << ".rev.bwt" << endl;
     }
-    if (!readText(baseFile + ".rev.bwt", revbwt)) {
-        throw runtime_error("Cannot open file: " + baseFile + ".rev.bwt");
+    if (strainFree) {
+        if (!revbwt.read(baseFile + ".rev.bwt")) {
+            throw runtime_error("Cannot open file: " + baseFile + ".rev.bwt");
+        }
     }
     if (verbose) {
         cout << "Done reading reverse BWT (size: " << revbwt.size() << ")"
@@ -191,12 +208,12 @@ length_t FMIndex<positionClass>::getTotalReportedNodePaths() const {
 template <class positionClass>
 length_t FMIndex<positionClass>::findLF(length_t k, bool reversed) const {
     if (reversed) {
-        length_t posInAlphabet = sigma.c2i((unsigned char)revbwt[k]);
+        length_t posInAlphabet = revbwt[k];
 
         return counts[posInAlphabet] + getNumberOfOccRev(posInAlphabet, k);
     }
 
-    length_t posInAlphabet = sigma.c2i((unsigned char)bwt[k]);
+    length_t posInAlphabet = bwt[k];
 
     return counts[posInAlphabet] + getNumberOfOcc(posInAlphabet, k);
 }
@@ -904,7 +921,7 @@ void FMIndex<positionClass>::recApproxMatchHamming(
 template <class positionClass>
 bool FMIndex<positionClass>::extendFMPosIntermediary(
     const SARangePair& parentRanges, vector<FMPosExt<positionClass>>& stack,
-    int row, length_t i, int trueDepth) {
+    int row, length_t i, int trueDepth) const {
 
     SARangePair pairForNewChar;
 
@@ -923,7 +940,7 @@ bool FMIndex<positionClass>::extendFMPosIntermediary(
 template <class positionClass>
 void FMIndex<positionClass>::extendFMPos(const SARangePair& parentRanges,
                                          vector<FMPosExt<positionClass>>& stack,
-                                         int row, int trueDepth) {
+                                         int row, int trueDepth) const {
 
     // iterate over the entire alphabet
     for (length_t i = 2; i < sigma.size(); i++) {
@@ -934,7 +951,7 @@ void FMIndex<positionClass>::extendFMPos(const SARangePair& parentRanges,
 
 template <class positionClass>
 void FMIndex<positionClass>::extendFMPos(
-    const positionClass& pos, vector<FMPosExt<positionClass>>& stack) {
+    const positionClass& pos, vector<FMPosExt<positionClass>>& stack) const {
     extendFMPos(pos.getRanges(), stack, pos.getDepth());
 }
 

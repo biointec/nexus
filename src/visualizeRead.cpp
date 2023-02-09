@@ -32,103 +32,155 @@ vector<string> schemes = {"kuch1",  "kuch2", "kianfar", "manbest",
  *
  */
 void showUsage() {
-    cout << "Usage: ./visualizeRead [options] basefilename read\n\n";
-    cout << " [Pattern matching options]\n";
-    cout << " -sfr --strain-free\tstrain-free matching\n";
-    cout << " -e   --max-ed\t\tmaximum edit distance [default = 0]\n";
-    cout << " -s   --sa-sparseness\tsuffix array sparseness factor "
-            "[default = "
-            "1]\n";
-    cout << " -c   --cp-sparseness\tsparseness factor that indicates "
-            "how many checkpoints must be stored to identify nodes. Use "
-            "\"none\" to use no checkpoints. Choose a value that was also used "
-            "during the building process. "
-            "[default = 128]\n";
-    cout
-        << " -f   --filter\t\tfiltering type that should be used to filter the "
-           "occurrences. This option is only valid in case of strain-free "
-           "matching. Options:\n\t"
-        << "linear\t\tlinear filtering is efficient but does not filter out "
-           "all redundant occurrences. Additionally, in some exceptional "
-           "cases, a non-optimal replacement occurrence can be chosen. This "
-           "is the default option.\n\t"
-        << "complete\tcomplete filtering leads to a set of occurrences with "
-           "no redundancy. This option is very slow however and thus not "
-           "recommended.\n";
-    cout << " -p   --partitioning\t\tAdd flag to do uniform/static/dynamic "
-            "partitioning. Dynamic partitioning cannot be used with "
-            "strain-free matching. [default = static]\n";
-    cout << " -m   --metric\t\tAdd flag to set distance metric "
-            "(editnaive/editopt/hamming) [default = editopt]\n";
-    cout << " -ss  --search-scheme\tChoose the search scheme\n  options:\n\t"
-         << "kuch1\tKucherov k + 1\n\t"
-         << "kuch2\tKucherov k + 2\n\t"
-         << "kianfar\tOptimal Kianfar scheme\n\t"
-         << "manbest\tManual best improvement for Kianfar scheme (only for ed "
-            "= 4)\n\t"
-         << "pigeon\tPigeonhole scheme\n\t"
-         << "01*0\t01*0 search scheme\n\t"
-         << "naive\tnaive backtracking\n\t"
-         << "custom\tcustom search scheme, the next parameter should be a path "
-            "to the folder containing this search scheme\n\n";
+    cout <<
 
-    cout << " [Visualization options]\n";
-    cout << " -d   --visualization-depth\t\tDepth of the visualized "
-            "neighborhood around the paths of interest [default = 3]\n";
-    cout << " -o   --output-files\t\tPrefix of the output files that will be "
-            "created during the visualization process [default = "
-            "basefilename]\n\n";
+        "This program aligns a short, single end read to a pan-genome de\n"
+        "Bruijn graph. It visualizes the corresponding node paths with their\n"
+        "surroundings in the graph.\n\n\n"
 
-    cout << "Following input files are required:\n";
-    cout << "\t<base filename>.txt: input text T\n";
-    cout << "\t<base filename>.cct: character counts table\n";
-    cout << "\t<base filename>.sa.[saSF]: sparse suffix array, with suffix "
-            "array sparseness factor [saSF] "
-            "elements\n";
-    cout << "\t<base filename>.sa.bv.[saSF]: bitvector indicating which "
-            "elements of the suffix array are stored.\n";
-    cout << "\t<base filename>.bwt: BWT of T\n";
-    cout << "\t<base filename>.rev.bwt: BWT of the reverse of T\n";
-    cout << "\t<base filename>.brt: Prefix occurrence table of T\n";
-    cout << "\t<base filename>.rev.brt: Prefix occurrence table of the "
-            "reverse "
-            "of T\n";
-    cout << "\t<base filename>.DBG: variable k and the compressed de "
-            "Bruijn graph.\n";
-    cout << "\t<base filename>.B.left: bitvector B_left for the compressed de "
-            "Bruijn graph.\n";
-    cout << "\t<base filename>.B.right.[cpSF]: bitvector B_right for the "
-            "compressed "
-            "de "
-            "Bruijn graph, with checkpoint sparseness factor [cpSF].\n";
-    cout << "\t<base filename>.B.right.full.[cpSF]: bitvector B_right_full for "
-            "the "
-            "compressed de Bruijn graph, with checkpoint sparseness factor "
-            "[cpSF].\n";
-    cout << "\t<base filename>.left.map: node identifier mapping corresponding "
-            "to B_left.\n";
-    cout << "\t<base filename>.right.map.[cpSF]: node identifier mapping "
-            "corresponding "
-            "to B_right, with checkpoint sparseness factor [cpSF].\n";
+        "Usage: ./visualizeRead [options] <basefilename> <k> <read>\n\n"
+
+        " Following input parameters are required:\n"
+        "  <basefilename>      base filename of the input index\n"
+        "  <k>                 the de Bruijn parameter of the index\n"
+        "  <read>              the read that must be aligned and "
+        "visualized.\n\n\n"
+
+        " [options]\n"
+        "  -e/--max-ed         maximum edit distance [default = 0]\n\n"
+
+        "  -s/--sa-sparseness  suffix array sparseness factor [default = "
+        "16]\n\n"
+
+        "  -c/--cp-sparseness  sparseness factor that indicates how many\n"
+        "                      checkpoints must be stored to identify nodes.\n"
+        "                      Use \"none\" to use no checkpoints. Choose a\n"
+        "                      value that was also used during the building\n"
+        "                      process. [default = 128]\n\n"
+
+        "  -p/--partitioning   Add flag to do uniform/static/dynamic\n"
+        "                      partitioning of the seeds for search schemes.\n"
+        "                      Dynamic partitioning cannot be used with\n"
+        "                      strain-free matching. [default = dynamic]\n\n"
+
+        "  -m/--metric         Add flag to set distance metric (editnaive/\n"
+        "                      editopt/ hamming) [default = editopt]\n\n"
+
+        "  -ss/--search-scheme Choose the search scheme. Options:\n"
+        "                       * kuch1    Kucherov k + 1 [default]\n"
+        "                       * kuch2    Kucherov k + 2\n"
+        "                       * kianfar  Optimal Kianfar scheme\n"
+        "                       * manbest  Manual best improvement for "
+        "Kianfar\n"
+        "                                  scheme (only for ed = 4)\n"
+        "                       * pigeon   Pigeonhole scheme\n"
+        "                       * 01*0     01*0 search scheme\n"
+        "                       * naive    naive backtracking\n"
+        "                       * custom   custom search scheme, the next\n"
+        "                                  parameter should be a path to the\n"
+        "                                  folder containing this "
+        "searchscheme\n\n"
+
+        "  -sfr/--strain-free  strain-free matching: occurrences can be\n"
+        "                      identified as any path of connected nodes. In\n"
+        "                      other words, they do not have to occur exactly\n"
+        "                      in one of the input genomes of the pan-genome.\n"
+        "                      This is option is not activated by default and\n"
+        "                      is slower than the default implementation.\n\n"
+
+        "  -f/--filter         filtering type that should be used to filter\n"
+        "                      the occurrences. This option is only valid in\n"
+        "                      case of strain-free matching. Options:\n"
+        "                       * linear: linear filtering is efficient but\n"
+        "                         does not filter out all redundant\n"
+        "                         occurrences. Additionally, in some\n"
+        "                         exceptional cases, a non-optimal "
+        "replacement\n"
+        "                         occurrence can be chosen. This is the\n"
+        "                         default option.\n"
+        "                       * complete: complete filtering leads to a set\n"
+        "                         of occurrences with no redundancy. This\n"
+        "                         option is very slow however and thus not\n"
+        "                         recommended.\n\n"
+
+        "  -d/--depth          Depth of the visualized neighborhood around "
+        "the\n"
+        "                      paths of interest [default = 3]\n\n"
+        "  -b/--bundle-edges   Bundle edges stemming from different strains\n"
+        "                      together. Recommended when many strains are\n"
+        "                      present [default = false]\n\n"
+        "  -o/--output-files   Prefix of the output files that will be "
+        "created\n"
+        "                      during the visualization process [default =\n"
+        "                      basefilename]\n\n\n"
+
+        " Following input files are required:\n"
+        "  <basefilename>.compressed.txt:           compressed version of the\n"
+        "                                           input text T\n\n"
+        "  <basefilename>.cct:                      character counts table\n\n"
+        "  <basefilename>.sa.<saSF>:                sparse suffix array, with\n"
+        "                                           suffix array sparseness\n"
+        "                                           factor <saSF> elements\n\n"
+        "  <basefilename>.sa.bv.<saSF>:             bitvector indicating "
+        "which\n"
+        "                                           elements of the suffix\n"
+        "                                           array are stored.\n\n"
+        "  <basefilename>.bwt:                      BWT of T\n\n"
+        "  <basefilename>.rev.bwt:                  BWT of the reverse of T\n\n"
+        "  <basefilename>.brt:                      Prefix occurrence table of "
+        "T\n\n"
+        "  <basefilename>.rev.brt:                  Prefix occurrence table "
+        "of\n"
+        "                                           the reverse of T\n\n"
+        "  <basefilename>.DBG.k<k>:                 the compressed de Bruijn\n"
+        "                                           graph for the requested "
+        "de\n"
+        "                                           Bruijn parameter\n\n"
+        "  <basefilename>.B.right.k<k>.cp<cpSF>:    first bitvector of the\n"
+        "                                           implicit representation "
+        "for\n"
+        "                                           the requested de Bruijn\n"
+        "                                           parameter, with "
+        "checkpoint\n"
+        "                                           sparseness factor "
+        "<cpSF>\n\n"
+        "  <basefilename>.B.left.k<k>:              second bitvector of the\n"
+        "                                           implicit representation\n"
+        "                                           for the requested de\n"
+        "                                           Bruijn parameter\n\n"
+        "  <basefilename>.right.map.k<k>.cp<cpSF>:  node identifier mapping\n"
+        "                                           corresponding to the "
+        "first\n"
+        "                                           bitvector, with "
+        "checkpoint\n"
+        "                                           sparseness factor "
+        "<cpSF>\n\n"
+        "  <basefilename>.left.map.k<k>:            node identifier mapping\n"
+        "                                           corresponding to the\n"
+        "                                           second bitvector\n\n\n";
 }
 
 int main(int argc, char* argv[]) {
 
-    int requiredArguments = 2; // baseFile of files and file containing reads
+    int requiredArguments = 3; // baseFile of files, k and file containing reads
+
+    if (argc == 2) {
+        string firstArg(argv[1]);
+        if (firstArg.find("help") != std::string::npos) {
+            showUsage();
+            return EXIT_SUCCESS;
+        }
+    }
 
     if (argc < requiredArguments) {
-        cerr << "Insufficient number of arguments" << endl;
+        cerr << "Insufficient number of arguments.\n" << endl;
         showUsage();
         return EXIT_FAILURE;
-    }
-    if (argc == 2 && strcmp("help", argv[1]) == 0) {
-        showUsage();
-        return EXIT_SUCCESS;
     }
 
     cout << "Welcome to Nexus!\n";
 
-    string saSparse = "1";
+    string saSparse = "16";
     string cpSparse = "128";
     string maxED = "0";
     string visDepthString = "3";
@@ -138,6 +190,7 @@ int main(int argc, char* argv[]) {
     bool strainFree = false;
     bool filteringIsChosen = false;
     bool filteringOptionComplete = false;
+    bool separateEdges = true;
 
     PartitionStrategy pStrat = STATIC;
     DistanceMetric metric = EDITOPTIMIZED;
@@ -193,13 +246,15 @@ int main(int argc, char* argv[]) {
             } else {
                 throw runtime_error(arg + " takes 1 argument as input");
             }
-        } else if (arg == "-d" || arg == "--visualization-depth") {
+        } else if (arg == "-d" || arg == "--depth") {
             if (i + 1 < argc) {
                 visDepthString = argv[++i];
 
             } else {
                 throw runtime_error(arg + " takes 1 argument as input");
             }
+        } else if (arg == "-b" || arg == "--bundle-edges") {
+            separateEdges = false;
         } else if (arg == "-o" || arg == "--output-files") {
             if (i + 1 < argc) {
                 outputFile = argv[++i];
@@ -277,7 +332,7 @@ int main(int argc, char* argv[]) {
 
         else {
             cerr << "Unknown argument: " << arg << " is not an option" << endl;
-            return false;
+            return EXIT_FAILURE;
         }
     }
 
@@ -317,7 +372,8 @@ int main(int argc, char* argv[]) {
         throw runtime_error("manbest only supports 4 allowed errors");
     }
 
-    string baseFile = argv[argc - 2];
+    string baseFile = argv[argc - 3];
+    uint k = atoi(argv[argc - 2]);
     string read = argv[argc - 1];
 
     if (outputFile == "") {
@@ -328,7 +384,7 @@ int main(int argc, char* argv[]) {
 
     if (strainFree) {
 
-        FMIndexDBG<FMPosSFR> bwt(baseFile, saSF, cpSF, strainFree,
+        FMIndexDBG<FMPosSFR> bwt(baseFile, saSF, cpSF, k, strainFree,
                                  filteringOptionComplete);
 
         SearchStrategyDBG<FMIndexDBG<FMPosSFR>, FMPosSFR>* strategy;
@@ -367,13 +423,13 @@ int main(int argc, char* argv[]) {
         }
         StrainFreeMapper mapper(strategy);
         auto results = mapper.matchApproxSFR(read, ed);
-        bwt.visualizeSubgraphs(results, visDepth, outputFile);
+        bwt.visualizeSubgraphs(results, visDepth, outputFile, separateEdges);
 
         delete strategy;
 
     } else {
 
-        FMIndexDBG<FMPos> bwt(baseFile, saSF, cpSF, strainFree);
+        FMIndexDBG<FMPos> bwt(baseFile, saSF, cpSF, k, strainFree);
 
         SearchStrategyDBG<FMIndexDBG<FMPos>, FMPos>* strategy;
         if (searchscheme == "kuch1") {
@@ -409,7 +465,7 @@ int main(int argc, char* argv[]) {
         }
 
         auto results = strategy->matchApproxSFI(read, ed);
-        bwt.visualizeSubgraphs(results, visDepth, outputFile);
+        bwt.visualizeSubgraphs(results, visDepth, outputFile, separateEdges);
 
         delete strategy;
     }

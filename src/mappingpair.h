@@ -54,7 +54,7 @@ struct MappingPair {
     /**
      * @brief Writes the node to a file
      *
-     * @param ofs output strean
+     * @param ofs output stream
      * @return std::ofstream& - output stream
      */
     std::ofstream& write(std::ofstream& ofs) {

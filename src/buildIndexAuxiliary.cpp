@@ -26,10 +26,10 @@
 
 using namespace std;
 
-void readText(const string& filename, string& buf) {
-    ifstream ifs(filename);
+void readTextOriginal(const string& filenamebase, string& buf) {
+    ifstream ifs(filenamebase + ".txt");
     if (!ifs)
-        throw runtime_error("Cannot open file: " + filename);
+        throw runtime_error("Cannot open file: " + filenamebase + ".txt");
 
     ifs.seekg(0, ios::end);
     buf.resize(ifs.tellg());

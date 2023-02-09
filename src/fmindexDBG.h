@@ -27,13 +27,14 @@
 #include "mappingpair.h"
 #include "node.h"
 #include "rankinterface.h"
-#include "rankselectinterface.h"
 
+#include <chrono>
 #include <map>
 #include <queue>
+#include <set>
 
 // ============================================================================
-// CLASS FMINDEXDBG
+// CLASS FM-INDEX DBG
 // ============================================================================
 
 template <class positionClass>
@@ -42,9 +43,31 @@ class FMIndexDBG : public FMIndex<positionClass> {
     friend class FMPosSFR;
 
   private:
-    // De Bruijn parameter
-    uint k;
-    // Number of strains in the pan-gemome
+    using FMIndex<positionClass>::textLength;
+    using FMIndex<positionClass>::sigma;
+    using FMIndex<positionClass>::text;
+    using FMIndex<positionClass>::counts;
+    using FMIndex<positionClass>::bwt;
+    using FMIndex<positionClass>::revbwt;
+    using FMIndex<positionClass>::fwdRepr;
+    using FMIndex<positionClass>::revRepr;
+    using FMIndex<positionClass>::sparseSA;
+    using FMIndex<positionClass>::numberOfSeparationCharacters;
+    using FMIndex<positionClass>::strainFree;
+    using FMIndex<positionClass>::nodeCounter;
+    using FMIndex<positionClass>::matrixElementCounter;
+    using FMIndex<positionClass>::positionsInPostProcessingCounter;
+    using FMIndex<positionClass>::redundantNodePathsCounter;
+
+    using FMIndex<positionClass>::findSA;
+    using FMIndex<positionClass>::findLF;
+    using FMIndex<positionClass>::setDirection;
+    using FMIndex<positionClass>::extendFMPosIntermediary;
+    using FMIndex<positionClass>::matchString;
+    using FMIndex<positionClass>::fromFiles;
+    using FMIndex<positionClass>::populateTable;
+
+    // Number of strains in the pan-genome
     uint numberOfStrains;
     // Number of nodes in the graph;
     uint numberOfGraphNodes;
@@ -53,14 +76,11 @@ class FMIndexDBG : public FMIndex<positionClass> {
     // graph
 
     // Set the bits to one for the last entry in the range in the SA for the
-    // rightmost k-mer of every node. This bit vector supports rank and select.
-    RankSelectInterface B_right;
+    // rightmost k-mer of every node. This bit vector supports rank.
+    RankInterface B_right;
     // Set the bits to one for the last entry in the range in the reverse SA for
     // the leftmost k-mer of every node. This bit vector supports rank.
     RankInterface B_left;
-    // Set the bits to one for every entry in the range in the SA for the
-    // rightmost k-mer of every node. This bit vector supports rank.
-    RankInterface B_right_full;
 
     // Mapping of right node IDs
     std::vector<MappingPair> mapping_right;
@@ -78,13 +98,16 @@ class FMIndexDBG : public FMIndex<positionClass> {
     // filtering process
     thread_local static length_t filterSpecialCaseCounter;
 
-    // the (sparse) reverse suffix array of the reference genome, this is only
-    // initialized in the build process
-    SparseSuffixArray sparseRevSA;
-
     // Boolean that stores the filtering option in case of strain-free matching:
     // linear or complete
     bool filteringOptionComplete = false;
+
+    // Timer for finding the node paths
+    std::chrono::duration<double> elapsedNodePaths =
+        std::chrono::duration<double>::zero();
+    // Timer for accessing the SA and finding the strains
+    std::chrono::duration<double> elapsedSAtoText =
+        std::chrono::duration<double>::zero();
 
     // ----------------------------------------------------------------------------
     // ROUTINES FOR THE BUILDING PROCESS
@@ -95,101 +118,124 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * bidirectional FM-index.
      *
      * @param baseFile Base filename for FM-index
-     * @param k k-mer size
+     * @param k_list List of the required k-mer sizes
      * @param sa_sparse Suffix array sparseness factor
      * @param checkpoint_sparseness Sparseness factors for the checkpoints that
      * aid in finding node identifiers.
      * @param progress Prints progress if true
+     * @param skip If true, the construction of the bidirectional FM-index can
+     * be skipped
      * @param option Select algorithm option
      */
-    FMIndexDBG(const std::string& baseFile, const int k,
+    FMIndexDBG(const std::string& baseFile, const std::vector<uint>& k_list,
                const std::vector<int>& sa_sparse,
                const std::vector<int>& checkpoint_sparseness,
-               const bool progress,
+               const bool progress, const bool skip,
                const SelectOption& option = SelectOption::SIMPLE)
-        : FMIndex<positionClass>(0, baseFile), k(k) {
+        : FMIndex<positionClass>(0, baseFile) {
 
-        createFMIndex(baseFile, sa_sparse);
-
-        k_DBG = k;
-
-        this->numberOfSeparationCharacters = 2;
-
-        // Count the number of strains
-        numberOfStrains =
-            (std::count(this->bwt.begin(), this->bwt.end(), '%') + 1);
-
-        this->numberOfSeparationCharacters = 2;
-        // Initialize the bit vectors
-        B_right.setN(this->textLength + 1);
-        B_right.setOption(RankSelectOption::RANK9SELECT);
-        B_left.setN(this->textLength + 1);
-        B_left.setOption(RankOption::RANK9);
-        B_right_full.setN(this->textLength + 1);
-        B_right_full.setOption(RankOption::RANK9);
-
-        std::vector<RankSelectInterface> B_rights(checkpoint_sparseness.size());
-        std::vector<RankInterface> B_right_fulls(checkpoint_sparseness.size());
-
-        for (uint j = 0; j < checkpoint_sparseness.size(); j++) {
-            B_rights[j].setN(this->textLength + 1);
-            B_rights[j].setOption(RankSelectOption::RANK9SELECT);
-            B_right_fulls[j].setN(this->textLength + 1);
-            B_right_fulls[j].setOption(RankOption::RANK9);
+        if (!skip) {
+            // The bidirectional FM-index must still be built
+            createFMIndex(baseFile, sa_sparse);
         }
 
-        std::vector<std::vector<MappingPair>> mapping_rights(
-            checkpoint_sparseness.size());
+        // Set global k variable to 0 here, since there can be multiple k values
+        // asked for the construction process
+        k_DBG = 0;
 
-        // Create the implicit compressed De Bruijn graph
-        buildCompressedGraph(checkpoint_sparseness, progress, B_rights,
-                             B_right_fulls, mapping_rights);
+        // Load all required FM-index files, as some are discared during its
+        // construction process to save memory
+        fromFiles(baseFile, false);
 
-        // Write the bitvectors to output files
+        // Load the sparse suffix array
+        sparseSA = SparseSuffixArray(baseFile, sa_sparse.back());
+
+        // populate table
+        populateTable(true);
+
+        // Count the number of strains
+        numberOfStrains = fwdRepr.occ(sigma.c2i('%'), textLength) + 1;
+
+        numberOfSeparationCharacters = 2;
+
+        // Initialize the bit vectors
+        B_right.setN(textLength + 1);
+        B_right.setOption(RankOption::RANK9);
+        B_left.setN(textLength + 1);
+        B_left.setOption(RankOption::RANK9);
+
+        for (uint k : k_list) {
+
+            // Clear the data corresponding to the previous k value
+            G.clear();
+            mapping_left.clear();
+            mapping_right.clear();
+
+            // Initialize the B_right vectors for the different checkpoint
+            // sparseness factors
+            std::vector<RankInterface> B_rights(checkpoint_sparseness.size());
+            for (uint j = 0; j < checkpoint_sparseness.size(); j++) {
+                B_rights[j].setN(textLength + 1);
+                B_rights[j].setOption(RankOption::RANK9);
+            }
+
+            // Initialize the mappings for different checkpoint sparseness
+            // factors
+            std::vector<std::vector<MappingPair>> mapping_rights(
+                checkpoint_sparseness.size());
+
+            // Reset matching direction
+            setDirection(FORWARD);
+
+            // Create the implicit compressed De Bruijn graph
+            buildCompressedGraph(checkpoint_sparseness, progress, B_rights,
+                                 mapping_rights, k);
+
+            // Write out the results
+            writeDBGfilesToOutput(baseFile, k, checkpoint_sparseness, B_rights,
+                                  mapping_rights);
+        }
+    }
+
+    void writeDBGfilesToOutput(
+        const std::string& baseFile, const int k,
+        const std::vector<int>& checkpoint_sparseness,
+        const std::vector<RankInterface>& B_rights,
+        std::vector<std::vector<MappingPair>>& mapping_rights) {
+        // Write the bit vectors to output files
         {
             for (uint j = 0; j < checkpoint_sparseness.size(); j++) {
                 std::string suffix =
                     checkpoint_sparseness[j] == INT32_MAX
                         ? "none"
                         : std::to_string(checkpoint_sparseness[j]);
-                std::ofstream ofs(baseFile + ".B.right." + suffix);
+                std::string filename = baseFile + ".B.right.k";
+                filename += std::to_string(k) + ".cp" + suffix;
+                std::ofstream ofs(filename);
                 if (!ofs) {
-                    throw std::runtime_error("Cannot open file: " + baseFile +
-                                             ".B.right." + suffix);
+                    throw std::runtime_error("Cannot open file: " + filename);
                 }
                 B_rights[j].write(ofs);
                 ofs.close();
             }
         }
         {
-            std::ofstream ofs(baseFile + ".B.left");
+            std::string filename = baseFile + ".B.left.k";
+            filename += std::to_string(k);
+            std::ofstream ofs(filename);
             if (!ofs) {
-                throw std::runtime_error("Cannot open file: " + baseFile +
-                                         ".B.left");
+                throw std::runtime_error("Cannot open file: " + filename);
             }
             B_left.write(ofs);
             ofs.close();
         }
-        // Write the bitvectors to output files
-        {
-            for (size_t j = 0; j < checkpoint_sparseness.size(); j++) {
-                std::string suffix =
-                    checkpoint_sparseness[j] == INT32_MAX
-                        ? "none"
-                        : std::to_string(checkpoint_sparseness[j]);
-                std::ofstream ofs(baseFile + ".B.right.full." + suffix);
-                if (!ofs) {
-                    throw std::runtime_error("Cannot open file: " + baseFile +
-                                             ".B.right.full." + suffix);
-                }
-                B_right_fulls[j].write(ofs);
-                ofs.close();
-            }
-        }
 
-        // Write the compressed De Bruijn graph to an output file
+        // Write the compressed De Bruijn graph to an output file, including the
+        // corresponding k value
         {
-            std::ofstream ofs(baseFile + ".DBG");
+            std::string filename = baseFile + ".DBG.k";
+            filename += std::to_string(k);
+            std::ofstream ofs(filename);
             ofs.write((char*)&k, sizeof(k));
             for (std::vector<Node>::iterator itr = G.begin(); itr != G.end();
                  ++itr) {
@@ -205,11 +251,11 @@ class FMIndexDBG : public FMIndex<positionClass> {
                     checkpoint_sparseness[j] == INT32_MAX
                         ? "none"
                         : std::to_string(checkpoint_sparseness[j]);
-                std::ofstream ofs(baseFile + ".right.map." + suffix,
-                                  std::ios::binary);
+                std::string filename = baseFile + ".right.map.k";
+                filename += std::to_string(k) + ".cp" + suffix;
+                std::ofstream ofs(filename, std::ios::binary);
                 if (!ofs) {
-                    throw std::runtime_error("Cannot open file: " + baseFile +
-                                             ".right.map." + suffix);
+                    throw std::runtime_error("Cannot open file: " + filename);
                 }
                 for (std::vector<MappingPair>::iterator itr =
                          mapping_rights[j].begin();
@@ -220,10 +266,11 @@ class FMIndexDBG : public FMIndex<positionClass> {
             }
         }
         {
-            std::ofstream ofs(baseFile + ".left.map", std::ios::binary);
+            std::string filename = baseFile + ".left.map.k";
+            filename += std::to_string(k);
+            std::ofstream ofs(filename, std::ios::binary);
             if (!ofs) {
-                throw std::runtime_error("Cannot open file: " + baseFile +
-                                         ".left.map");
+                throw std::runtime_error("Cannot open file: " + filename);
             }
             ofs.write((char*)&mapping_left[0],
                       mapping_left.size() * sizeof(int));
@@ -244,32 +291,17 @@ class FMIndexDBG : public FMIndex<positionClass> {
                        const std::vector<int>& sparse_sa);
 
     /**
-     * @brief Find the entry in the reverse suffix array of this index. This is
-     * computed from the sparse reverse suffix array and the reverse bwt. This
-     * function only works when the reverse SA is stored, which is only during
-     * the build process.
-     *
-     * @param index the index to find the entry in the reverse SA of
-     * @return length_t - the entry in the SA of the index
-     */
-    length_t findRevSA(length_t index) const;
-
-    /**
-     * @brief Build the compacted longest common prefix array. An entry of 0
-     * means that the LCP is shorter than k, an entry of 1 means that the LCP
-     * has length k and an entry of 2 means that the LCP is longer than k.
+     * @brief Build the compacted longest common prefix array corresponding to
+     * the Kasai algorithm. An entry of 0 means that the LCP is shorter than k,
+     * an entry of 1 means that the LCP has length k and an entry of 2 means
+     * that the LCP is longer than k.
      *
      * @param LCP A 2-bitvector object in which the compacted LCP will be
      * stored. It will be overwritten.
      * @param progress Prints progress if true
+     * @param k The k value determining the compacted LCP
      */
-    void computeLCP(Bitvec2& LCP, bool progress);
-
-    /**
-     * @brief Compute the Br_right and Bl_right bitvectors
-     *
-     * @param Q Node queue
-     */
+    void computeLCPKasai(Bitvec2& LCP, bool progress, uint& k);
 
     /**
      * @brief Build the Br_right and Bl_right bitvectors
@@ -280,9 +312,10 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param Bl_right bit vector in which Br_right will be stored, will be
      * overwritten
      * @param progress Prints progress if true
+     * @param k De Bruijn k parameter corresponding to the bitvectors
      */
     void computeBitVectors(std::queue<int>& Q, Bitvec& Br_right,
-                           Bitvec& Bl_right, bool progress);
+                           Bitvec& Bl_right, bool progress, uint& k);
 
     /**
      * @brief For an ω-interval [i,j[, the function call getIntervals(i,j)
@@ -302,19 +335,11 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * first k-mer is of interest
      * @param isEndNode indicates whether the node we are looking at is an end
      * node, since these have a different convention
+     * @param k length of the k-mer
      * @return Range - the range over the reverse suffix array corresponding to
      * the k-mer of interest
      */
-    Range getReverseRange(length_t indexInSA, bool isEndNode);
-
-    /**
-     * @brief Set the edge mapping of a node. The edge mapping maps the ranks of
-     * the edges in the SA to their ranks in the reverse SA.
-     *
-     * @param id The identifier of the node for which the mapping must be
-     * constructed.
-     */
-    void setEdgeMapping(length_t id);
+    Range getReverseRangeKMer(length_t indexInSA, bool isEndNode, uint& k);
 
     /**
      * @brief Build the implicit compressed de Bruijn graph
@@ -324,17 +349,15 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param progress Prints progress if true
      * @param B_rights B_right bit vectors for different checkpoint sparseness
      * factors
-     * @param B_right_fulls B_right_full bit vectors for different checkpoint
-     * sparseness factors
      * @param mapping_rights mapping_right mappings for different checkpoint
      * sparseness factors
+     * @param k current de Bruijn parameter k
      */
     void
     buildCompressedGraph(const std::vector<int>& checkpoint_sparseness,
-                         bool progress,
-                         std::vector<RankSelectInterface>& B_rights,
-                         std::vector<RankInterface>& B_right_fulls,
-                         std::vector<std::vector<MappingPair>>& mapping_rights);
+                         bool progress, std::vector<RankInterface>& B_rights,
+                         std::vector<std::vector<MappingPair>>& mapping_rights,
+                         uint& k);
 
     // ----------------------------------------------------------------------------
     // HELPER ROUTINES FOR MAPPING
@@ -361,36 +384,6 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * Bruijn graph
      */
     int findIDFirst(length_t i) const;
-
-    /**
-     * @brief If i is an index for the suffix array, find the node in the
-     * compressed de Bruijn graph that corresponds to T[SA[i]..SA[i]+k[.
-     * T[SA[j-1]..SA[j-1]+k[ can be at any location in the node.
-     *
-     * @param i Index in the suffix array indicating a certain k-mer of a
-     * node
-     * @param id the ID of the corresponding node in the compressed de Bruijn
-     * graph (to be filled in)
-     * @param l the number of characters that are before the k-mer in the node
-     * (to be filled in)
-     */
-
-    /**
-     * @brief If i is an index for the suffix array, find the node in the
-     * compressed de Bruijn graph that corresponds to T[SA[i]..SA[i]+k[.
-     * T[SA[j-1]..SA[j-1]+k[ can be at any location in the node.
-     *
-     * @param i Index in the suffix array indicating a certain k-mer of a
-     * node
-     * @param id the ID of the corresponding node in the compressed de Bruijn
-     * graph (to be filled in)
-     * @param l the number of characters that are before the k-mer in the node
-     * (to be filled in)
-     * @param offset the offset of the edge in the reverse SA corresponding to
-     * index i in the regular SA (to be filled in)
-     */
-    void findIDandOffset(length_t i, uint32_t& id, uint32_t& l,
-                         uint32_t& offset) const;
 
     /**
      * @brief Find the identifier of the successor of node id by following the
@@ -422,7 +415,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      *
      * @param id Identifier of the current node
      * @param id_successor Identifier of the successor (to be filled in)
-     * @param posInAlphabet Position in the alfabet of the character to add
+     * @param posInAlphabet Position in the alphabet of the character to add
      * @param reverse_offset The offset in the new interval (with respect to the
      * reverse SA). This is needed for end nodes.
      * @return true - a successor was found
@@ -438,7 +431,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      *
      * @param id Identifier of the current node
      * @param id_predecessor Identifier of the predecessor (to be filled in)
-     * @param posInAlphabet Position in the alfabet of the character to add
+     * @param posInAlphabet Position in the alphabet of the character to add
      * @param offset Placeholder variable such that jumpToPredecessorWithChar
      * and jumpToSuccessorWithChar have the same parameters. This variable is
      * not used.
@@ -475,17 +468,18 @@ class FMIndexDBG : public FMIndex<positionClass> {
      *
      * @param ranges the ranges in the SA and revSA of the approximate match
      * @param nodepath the node path of the approximate match
+     * @param distanceFromLeftEnd the distance from the occurrence to the left
+     * end of the first node of the node path
      * @param patternLength the length of the approximate match
      * @param distance the error distance of the approximate match
      * @param shift the shit of the approximate match
      * @return std::vector<TextOccurrenceSFI> - a vector of matches in the text
      * containing a range and the edit distance
      */
-    std::vector<TextOccurrenceSFI>
-    convertToMatchesInTextSFI(const SARangePair& ranges,
-                              const std::vector<uint32_t>& nodepath,
-                              const int& patternLength, const int& distance = 0,
-                              const length_t& shift = 0);
+    std::vector<TextOccurrenceSFI> convertToMatchesInTextSFI(
+        const SARangePair& ranges, const std::vector<uint32_t>& nodepath,
+        const uint32_t& distanceFromLeftEnd, const int& patternLength,
+        const int& distance = 0, const length_t& shift = 0);
 
     /**
      * @brief Check if one of the children of a position is a separation
@@ -496,7 +490,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * character
      * @return false otherwise
      */
-    const bool separationIsNext(positionClass pos) const;
+    const bool separationIsNext(positionClass pos) const override;
 
     /**
      * @brief Pushes all the children corresponding to the node with ranges
@@ -510,7 +504,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      */
     void extendFMPos(const SARangePair& parentRanges,
                      std::vector<FMPosExt<positionClass>>& stack, int row,
-                     int trueDepth = -1) override;
+                     int trueDepth = -1) const override;
 
     /**
      * @brief Pushes all the children corresponding to the this position onto
@@ -519,8 +513,9 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param pos the position to get the children of
      * @param stack the stack to push the children on
      */
-    void extendFMPos(const positionClass& pos,
-                     std::vector<FMPosExt<positionClass>>& stack) override;
+    void
+    extendFMPos(const positionClass& pos,
+                std::vector<FMPosExt<positionClass>>& stack) const override;
 
     /**
      * @brief Find the node path in the compressed De Bruijn graph corresponding
@@ -535,16 +530,19 @@ class FMIndexDBG : public FMIndex<positionClass> {
     findNodePathForMatch(const FMOcc<positionClass>& occ);
 
     /**
-     * @brief Find the node path in the compressed De Bruijn graph corresponding
-     * to a certain match in a forward way
+     * @brief Find the node path in the compressed De Bruijn graph
+     * corresponding to a certain match in a forward way
      *
      * @param pos The position corresponding to the match of interest
      * @param shift The shift corresponding to the match of interest
-     * @param path The node path corresponding to the match of interest (to be
-     * filled in)
+     * @param path The node path corresponding to the match of interest (to
+     * be filled in)
+     * @param distanceFromLeftEnd the distance from the occurrence to the left
+     * end of the first node of the node path
      */
     void findNodePathForMatchForward(const positionClass& pos, const int& shift,
-                                     std::vector<uint32_t>& path) const;
+                                     std::vector<uint32_t>& path,
+                                     uint32_t& distanceFromLeftEnd);
 
     /**
      * @brief Find to which strain a certain position in the text belongs
@@ -552,7 +550,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param input Position in the original text
      * @return int - Strain ID
      */
-    int findStrain(length_t input);
+    int findStrain(length_t input) const;
 
     // ----------------------------------------------------------------------------
     // ROUTINES FOR FILTERING STRAIN-FREE OCCURRENCES
@@ -571,7 +569,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
 
     /**
      * @brief Alternative compare function used for sorting purposes. This
-     * function first distinghuishes based on node path size.
+     * function first distinguishes based on node path size.
      *
      * @param occ1 First occurrence to compare
      * @param occ2 Second occurrence to compare
@@ -633,7 +631,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
 
     /**
      * @brief This function is called when a new minimum is found such that the
-     * replacement related paramters for all occurrences in the current prefix
+     * replacement related parameters for all occurrences in the current prefix
      * branch can be updated.
      *
      * @param previousMatches The vector containing the current prefix branch
@@ -724,7 +722,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
 
     /**
      * @brief This function iterates over all occurrences and analyzes them by
-     * checking if the node paths are prefixes of eachother. If so, certain
+     * checking if the node paths are prefixes of each other. If so, certain
      * attributes are set. The result of this function depends on the direction
      * of the node path (regular or reverse).
      *
@@ -787,7 +785,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
     // ----------------------------------------------------------------------------
 
     /**
-     * @brief Initialize the outputfiles for the subgraph visualization process
+     * @brief Initialize the output files for the subgraph visualization process
      *
      * @param filename The base filename for all output files
      * @param multipleSubgraphs Indicates whether there are multiple subgraphs
@@ -802,7 +800,7 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @brief Make sure a node is visited in the visualization process
      *
      * @param id The node that needs to be visited
-     * @param depth The current neigborhood depth
+     * @param depth The current neighborhood depth
      * @param visited_nodes Array of nodes that have been visited
      * @param node_queue Queue of nodes that still need to be visited
      */
@@ -826,34 +824,44 @@ class FMIndexDBG : public FMIndex<positionClass> {
                             std::vector<uint32_t>& path);
 
     /**
-     * @brief Intermadiary function in the visualization process. It takes a
+     * @brief Intermediary function in the visualization process. It takes a
      * node and executes everything that is necessary to visualize this node
-     * and its surroudings.
+     * and its surroundings.
      *
      * @param path node path of the original match
      * @param subgraph_id ID of the subgraph (a match can have multiple
      * subgraphs)
      * @param visited_nodes array of nodes that have been visited
      * @param node_queue queue of nodes that still need to be visited
-     * @param edgefile the output stream corresponding to the edge file
+     * @param edges Map of edges, along with their corresponding colors and
+     * respective multiplicities
      * @param edgecounter counter for the key column
      * @param visualizedNodes Vector containing all initialized visualization
-     * nodes
+     * @param separateEdges if false, parallel edges must be bundled together
+     * irrespective of their color
+     * @param subgraphNodes to be filled in: all nodes in the node path
      */
     void visualizeSubgraphIntermediary(
         std::vector<uint32_t>& path, std::string subgraph_id,
         std::vector<uint32_t>& visited_nodes,
-        std::queue<std::pair<int, int>>& node_queue, std::ofstream& edgefile,
-        size_t& edgecounter, std::vector<VisualizationNode*>& visualizedNodes);
+        std::queue<std::pair<int, int>>& node_queue,
+        std::map<std::string, std::map<length_t, length_t>>& edges,
+        size_t& edgecounter, std::vector<VisualizationNode*>& visualizedNodes,
+        bool separateEdges, std::set<uint32_t>& subgraphNodes);
 
   public:
+    using FMIndex<positionClass>::matchStringBidirectionally;
+    using FMIndex<positionClass>::findRangesWithExtraCharBackward;
+    using FMIndex<positionClass>::findRangesWithExtraCharForward;
+    using FMIndex<positionClass>::approxMatchesNaiveIntermediate;
+    using FMIndex<positionClass>::getText;
     // ----------------------------------------------------------------------------
     // ROUTINES FOR THE BUILDING AND LOADING PROCESS
     // ----------------------------------------------------------------------------
 
     /**
      * @brief Build the implicit representation of the compressed De Bruijn
-     * graph based on the bidirectional FM-index
+     * graph based on the bidirectional FM-index.
      *
      * @param baseFile base for the filenames
      * @param k parameter for the De Bruijn graph
@@ -861,12 +869,16 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param checkpoint_sparseness sparseness factors for the checkpoints that
      * aid in finding node identifiers.
      * @param progress prints progress if true
+     * @param skip if true, the bidirectional FM-index is already present and
+     * must not be rebuilt
      */
-    static void buildFMIndexDBG(const std::string& baseFile, const int k,
+    static void buildFMIndexDBG(const std::string& baseFile,
+                                const std::vector<uint>& k,
                                 const std::vector<int>& sa_sparse,
                                 const std::vector<int>& checkpoint_sparseness,
-                                const bool progress) {
-        FMIndexDBG(baseFile, k, sa_sparse, checkpoint_sparseness, progress);
+                                const bool progress, const bool skip) {
+        FMIndexDBG(baseFile, k, sa_sparse, checkpoint_sparseness, progress,
+                   skip);
     }
 
     /**
@@ -875,117 +887,126 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param baseFile base for the filenames
      * @param sa_sparse sparseness factor for the SA
      * @param cp_sparse sparseness factor for the checkpoint k-mers
+     * @param k de Bruijn parameter
      * @param strainFree bool that indicates whether strain-free matching
      * will be used or not
+     * @param filteringOptionComplete filtering option for strain-free matching
      * @param option select algorithm option
      */
     FMIndexDBG(const std::string& baseFile, int sa_sparse, int cp_sparse,
-               bool strainFree = false, bool filteringOptionComplete = false,
+               uint k, bool strainFree = false,
+               bool filteringOptionComplete = false,
                const SelectOption& option = SelectOption::SIMPLE)
-        : FMIndex<positionClass>(baseFile, sa_sparse) {
+        : FMIndex<positionClass>(baseFile, sa_sparse, true, strainFree) {
         std::cout << "Constructing the compressed de Bruijn graph..."
                   << std::endl;
+
+        // Store the de Bruijn parameter in a global variable so that it can be
+        // used everywhere
+        k_DBG = k;
 
         this->strainFree = strainFree;
         this->filteringOptionComplete = filteringOptionComplete;
 
         // Find the number of strains
-        numberOfStrains =
-            (std::count(this->bwt.begin(), this->bwt.end(), '%') + 1);
-        this->numberOfSeparationCharacters = 2;
+        numberOfStrains = fwdRepr.occ(sigma.c2i('%'), textLength) + 1;
+        numberOfSeparationCharacters = 2;
 
         // Find all start positions of the different strains and sort them along
         // with the position of the sentinel character
-        sorted_startpositions.emplace_back(this->findSA(0));
+        sorted_startpositions.emplace_back(findSA(0));
         for (length_t i = 1; i < numberOfStrains; i++) {
-            sorted_startpositions.emplace_back(this->findSA(i) + 1);
+            sorted_startpositions.emplace_back(findSA(i) + 1);
         }
         std::sort(sorted_startpositions.begin(), sorted_startpositions.end());
 
         std::string suffix =
             cp_sparse == INT32_MAX ? "none" : std::to_string(cp_sparse);
 
-        // read the bit vectors for the implicit representation of the
-        // compressed De Bruijn graph from files
-        {
-            std::ifstream ifs(baseFile + ".B.right." + suffix);
-            if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".B.right." + suffix);
-            }
-            B_right.read(ifs);
-            ifs.close();
-        }
-        {
-            std::ifstream ifs(baseFile + ".B.left");
-            if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".B.left");
-            }
-            B_left.read(ifs);
-            ifs.close();
-        }
-        {
-            std::ifstream ifs(baseFile + ".B.right.full." + suffix);
-            if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".B.right.full." + suffix);
-            }
-            B_right_full.read(ifs);
-            ifs.close();
-        }
-        // // Debugging
-        // for (length_t i = 0; i < textLength; i++)
-        // {
-        //         std::cout << i << " B_left " << B_left[i]
-        //         << std::endl;
-        // }
-
         // read implicit representation of the compressed De Bruijn graph from
         // files
         {
             G = std::vector<Node>();
             Node n = Node();
-            std::ifstream ifs(baseFile + ".DBG");
+            std::string filename = baseFile + ".DBG.k";
+            filename += std::to_string(k_DBG);
+            std::ifstream ifs(filename);
             if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".DBG");
+                std::string filename2 = baseFile + ".DBG";
+                std::ifstream ifs2(filename2);
+                if (ifs2) {
+                    std::cout
+                        << "\nIt seems like you are trying to run Nexus v1.1.0 "
+                           "on an index that was built using Nexus v1.0.0, "
+                           "which is not possible. Please rebuild your index."
+                        << std::endl;
+                    exit(0);
+                }
+                throw std::runtime_error("Cannot open file " + filename);
             }
-            ifs.read((char*)&k, sizeof(k));
+            ifs.read((char*)&k_DBG, sizeof(k_DBG));
             while (!n.read(ifs).eof()) {
                 G.emplace_back(n);
             }
             ifs.close();
         }
-        std::cout << "k = " << k << std::endl;
-        k_DBG = k;
+        std::cout << "k = " << k_DBG << std::endl;
         numberOfGraphNodes = G.size();
 
         std::cout << "The pan-genome graph contains " << numberOfGraphNodes
                   << " nodes." << std::endl;
 
-        // read the node identifier mappings from files
+        // read the bit vectors for the implicit representation of the
+        // compressed De Bruijn graph from files
         {
-            std::ifstream ifs(baseFile + ".right.map." + suffix,
-                              std::ios::binary);
+            std::string filename = baseFile + ".B.right.k";
+            filename += std::to_string(k_DBG) + ".cp" + suffix;
+            std::ifstream ifs(filename);
             if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".right.map." + suffix);
+                throw std::runtime_error("Cannot open file " + filename);
             }
-            // ifs.seekg(0, std::ios::end);
-            // mapping_right.resize(ifs.tellg() / sizeof(int)); //TODO can this
-            // still be used?
-            MappingPair mp = MappingPair();
-            while (!mp.read(ifs).eof()) {
-                mapping_right.emplace_back(mp);
-            }
+            B_right.read(ifs);
             ifs.close();
         }
         {
-            std::ifstream ifs(baseFile + ".left.map", std::ios::binary);
+            std::string filename = baseFile + ".B.left.k";
+            filename += std::to_string(k_DBG);
+            std::ifstream ifs(filename);
             if (!ifs) {
-                throw std::runtime_error("Cannot open file " + baseFile +
-                                         ".left.map");
+                throw std::runtime_error("Cannot open file " + filename);
+            }
+            B_left.read(ifs);
+            ifs.close();
+        }
+        // // Debugging
+        // for (length_t i = 0; i < textLength; i++)
+        // {
+        //         std::cout << i << " B_left " << B_left[i] << " B_right " <<
+        //         B_right[i]
+        //         << std::endl;
+        // }
+
+        // read the node identifier mappings from files
+        {
+            std::string filename = baseFile + ".right.map.k";
+            filename += std::to_string(k_DBG) + ".cp" + suffix;
+            std::ifstream ifs(filename, std::ios::binary);
+            if (!ifs) {
+                throw std::runtime_error("Cannot open file " + filename);
+            }
+            ifs.seekg(0, std::ios::end);
+            mapping_right.resize(ifs.tellg() / (2 * sizeof(int)));
+            ifs.seekg(0, std::ios::beg);
+            ifs.read((char*)&mapping_right[0],
+                     mapping_right.size() * 2 * sizeof(int));
+            ifs.close();
+        }
+        {
+            std::string filename = baseFile + ".left.map.k";
+            filename += std::to_string(k_DBG);
+            std::ifstream ifs(filename, std::ios::binary);
+            if (!ifs) {
+                throw std::runtime_error("Cannot open file " + filename);
             }
             ifs.seekg(0, std::ios::end);
             mapping_left.resize(ifs.tellg() / sizeof(int));
@@ -1003,13 +1024,32 @@ class FMIndexDBG : public FMIndex<positionClass> {
     // ----------------------------------------------------------------------------
 
     /**
+     * @brief Get the timer for finding the node paths in the graph
+     *
+     * @return std::chrono::duration<double> - timer
+     */
+    std::chrono::duration<double> getNodePathDuration() const {
+        return elapsedNodePaths;
+    }
+
+    /**
+     * @brief Get the timer for postprocessing (accessing the suffix array,
+     * filtering and identifying the strains)
+     *
+     * @return std::chrono::duration<double> - timer
+     */
+    std::chrono::duration<double> getSADuration() const {
+        return elapsedSAtoText;
+    }
+
+    /**
      * @brief return whether we are matching strain-free or not
      *
      * @return true if we are matching strain-free
      * @return false otherwise
      */
     bool isStrainFree() const {
-        return this->strainFree;
+        return strainFree;
     }
 
     /**
@@ -1057,37 +1097,82 @@ class FMIndexDBG : public FMIndex<positionClass> {
         FMPosSFR::setDirection(d);
     }
 
+    /**
+     * @brief Return a set of statistics concerning the graph topology. All
+     * parameters are to be filled in.
+     *
+     * @param numberOfNodes total number of nodes
+     * @param numberOfEdges total number of edges
+     * @param totalLength total length summed over all nodes
+     * @param totalMultiplicity total multiplicity summed over all nodes (only
+     * differs from numberOfEdges because of the end nodes)
+     * @param lengths vector of the lengths of all nodes
+     * @param multiplicities vector of the multiplicities of all nodes
+     */
+    void stats(uint32_t& numberOfNodes, uint64_t& numberOfEdges,
+               uint64_t& totalLength, uint64_t& totalMultiplicity,
+               std::vector<uint32_t>& lengths,
+               std::vector<uint32_t>& multiplicities) {
+        numberOfNodes = G.size();
+        for (Node n : G) {
+            if (!(n.right_kmer_forward < numberOfStrains)) {
+                numberOfEdges += n.multiplicity;
+            }
+            totalMultiplicity += n.multiplicity;
+            multiplicities.push_back(n.multiplicity);
+            totalLength += n.len;
+            lengths.push_back(n.len);
+        }
+    }
+
+    /**
+     * @brief Get the node with a certain identifier
+     *
+     * @param nodeID identifier of the node of interest
+     * @return const Node& - output node
+     */
+    const Node& getNode(const uint32_t& nodeID) const {
+        return G[nodeID];
+    }
+
+    /**
+     * @brief Get the implicit graph vector
+     *
+     * @return const std::vector<Node>& - implicit graph vector
+     */
+    const std::vector<Node>& getGraph() const {
+        return G;
+    }
+
     // ----------------------------------------------------------------------------
     // ROUTINES FOR MAPPING
     // ----------------------------------------------------------------------------
 
     /**
-     * @brief If i is an index for the suffix array, find the node in the
-     * compressed de Bruijn graph that corresponds to T[SA[i]..SA[i]+k[.
-     * T[SA[j-1]..SA[j-1]+k[ can be at any location in the node.
+     * @brief If j the (exclusive) right bound of the SA interval corresponding
+     * to a certain k-mer, find the node in the compressed de Bruijn graph that
+     * corresponds to T[SA[j-1]..SA[j-1]+k[. T[SA[j-1]..SA[j-1]+k[ can be at any
+     * location in the node.
      *
-     * @param i Index in the suffix array indicating a certain k-mer of a
+     * @param j Index in the suffix array indicating a certain k-mer of a
      * node
      * @param id the ID of the corresponding node in the compressed de Bruijn
      * graph (to be filled in)
      * @param l the number of characters that are before the k-mer in the node
      * (to be filled in)
      */
-    void findID(length_t i, uint32_t& id, uint32_t& l) const;
-
-    // ----------------------------------------------------------------------------
-    // ROUTINES FOR EXACT PATTERN MATCHING
-    // ----------------------------------------------------------------------------
+    void findID(length_t j, uint32_t& id, uint32_t& l) const;
 
     /**
-     * @brief Exactly match the pattern to the compressed De Bruijn graph in a
-     * strain-fixed way
+     * @brief For an occurrence shorter than k, find all possible nodes in which
+     * it occurs
      *
-     * @param pattern the pattern to be matched
-     * @return std::vector<TextOccurrenceSFI> - the result of the matching
-     * procedure
+     * @param occ The occurrence of interest
+     * @param shift Shift caused by the optimized edit distance
+     * @param path Output node path (to be filled in)
      */
-    std::vector<TextOccurrenceSFI> ExactMatchSFI(const std::string& pattern);
+    void findNodeUnderK(const positionClass& occ, const int& shift,
+                        std::vector<uint32_t>& path);
 
     // ----------------------------------------------------------------------------
     // ROUTINES FOR APPROXIMATE PATTERN MATCHING
@@ -1153,13 +1238,18 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param path the path that needs to visualized
      * @param depth the depth of the subgraph
      * @param filename the base for the filenames of the output files
+     * @param separateEdges if false, parallel edges must be bundled together
+     * irrespective of their color
      * @param multipleSubgraphs bool indicating whether there are multiple
      * subgraphs
      * @param subgraph_id id of the subgraph
+     * @return std::set<uint32_t> - all nodes in the subgraph
      */
-    void visualizeSubgraph(std::vector<uint32_t>& path, uint32_t depth,
-                           std::string filename, bool multipleSubgraphs = false,
-                           std::string subgraph_id = "");
+    std::set<uint32_t> visualizeSubgraph(std::vector<uint32_t>& path,
+                                         uint32_t depth, std::string filename,
+                                         bool separateEdges,
+                                         bool multipleSubgraphs = false,
+                                         std::string subgraph_id = "");
 
     /**
      * @brief Visualize the subgraphs corresponding to the (approximate) matches
@@ -1170,10 +1260,13 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * text occurrences as values
      * @param depth the depth of the subgraph
      * @param filename the base for the filenames of the output files
+     * @param separateEdges if false, parallel edges must be bundled together
+     * irrespective of their color
      */
     void visualizeSubgraphs(
-        std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>& paths,
-        uint32_t depth, std::string filename);
+        const std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>>&
+            paths,
+        uint32_t depth, std::string filename, bool separateEdges);
 
     /**
      * @brief Visualize the subgraphs corresponding to the (approximate) matches
@@ -1183,7 +1276,9 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param paths vector containing the strain-free matches
      * @param depth the depth of the subgraph
      * @param filename the base for the filenames of the output files
+     * @param separateEdges if false, parallel edges must be bundled together
+     * irrespective of their color
      */
-    void visualizeSubgraphs(std::vector<FMOccSFR>& paths, uint32_t depth,
-                            std::string filename);
+    void visualizeSubgraphs(const std::vector<FMOccSFR>& paths, uint32_t depth,
+                            std::string filename, bool separateEdges);
 };

@@ -1,5 +1,5 @@
 # Nexus
-Pan-genome compacted de Bruijn graphs with support for approximate pattern matching using search schemes
+Pan-genome compacted de Bruijn graph using the Bidirectional FM-index with support for lossless approximate pattern matching using search schemes and subgraph visualization. 
 
 <!--- TODO: reference paper 
 Columba was introduced in our [paper](https://doi.org/10.1016/j.isci.2021.102687). If you find this code useful in your research, please cite: 
@@ -53,30 +53,51 @@ cmake ..
 make 
 ```
 # Usage:
-Nexus aligns reads to a compressed pan-genome de Bruijn graph. To do this you need to build the implicit representation of this graph, along with the underlying bidirectional FM-index, based on the input data. Currently we only support input data with an alphabet of length 6 (for DNA: A, C, G, T + separation characters: $, %). Both separation character must be present to guarantee correct functionality. In other words, at least two genome strains should be included.
+Nexus aligns reads to a compressed pan-genome de Bruijn graph. To do this you need to build the implicit representation of this graph, along with the underlying bidirectional FM-index, based on the input data. Currently we only support input data with an alphabet of length 6 (for DNA: A, C, G, T + separation characters: $, %). Both separation characters must be present to guarantee correct functionality. In other words, at least two genome strains should be included.
 
-Nexus integrates code from three external repositories:
+Nexus integrates code from five external repositories:
 * [Columba](https://github.com/biointec/columba) is the base of the search schemes implementation
-* [radixSA64](https://github.com/mariusmni/radixSA64) for building suffix arrays
+* [libdivsufsort](https://github.com/y-256/libdivsufsort) for building suffix arrays
+* [radixSA64](https://github.com/mariusmni/radixSA64), an alternative library for building suffix arrays
 * [sux](https://github.com/vigna/sux) for bit vector rank and select support
+* [bwt2lcp](https://github.com/nicolaprezza/bwt2lcp) for building the longest common prefix array in a memory-efficient manner
 
 ## Building the Representation
-To build the implicit representation of the compressed de Bruijn graph, along with the underlying bidirectional FM-index, only the search text (the pan-genome) is required. We make use of [radixSA64](https://github.com/mariusmni/radixSA64) for building suffix arrays. This is integrated in our building code.
+To build the implicit representation of the compressed de Bruijn graph, along with the underlying bidirectional FM-index, only the search text (the pan-genome) is required. We make use of [libdivsufsort](https://github.com/y-256/libdivsufsort) for building suffix arrays and [bwt2lcp](https://github.com/nicolaprezza/bwt2lcp) for building the longest common prefix array in a memory-efficient manner. This is integrated in our building code.
 
 To build the implicit representation of the compressed de Bruijn graph, run the following command in the `build` folder. 
 ```bash
-./nexusBuild [basefile] [k]
+./nexusBuild <base filename> <k_list>
 ```
 
-The basefile parameter demonstrates where the search text can be found. The k parameter determines the minimum node length of the compressed de Bruijn graph. 
+The basefile parameter demonstrates where the search text can be found. The k_list parameter determines for which de Bruijn parameters de graph must be built (i.e., the minimum node lengths of the compressed de Bruijn graph). 
 
 Options:
 
 ```
 [options]
-  -s  --sa-sparseness	Suffix array sparseness factors to be used. This option can be repeated multiple times for multiple versions of the suffix array. This option takes values in {1, 2, 4, 8, 16, 32, 64, 128, 256}. Use "all" to use all options. [default = 1]
-  -c  --cp-sparseness	Sparseness factor that indicates how many checkpoints must be stored to identify nodes. This option can be repeated multiple times for multiple versions of the checkpoint sparseness. Use "none" to use no checkpoints. [default = 128]
-  -p  --progress	Report extra progress updates
+  --skip                Skip the building process of the data
+                        structures that are independent of the de
+                        Bruijn k parameter (i.e., the bidirectional
+                        FM-index). These data structures must be
+                        available in the directory.
+
+  -s/--sa-sparseness    Suffix array sparseness factors to be
+                        used. This option can be repeated multiple
+                        times for multiple versions of the suffix
+                        array. This option takes values in {1, 2,
+                        4, 8, 16, 32, 64, 128, 256}. Use "all"
+                        to use all options. [default = 16]
+
+  -c/--cp-sparseness    Sparseness factor that indicates how many
+                        checkpoints must be stored to identify
+                        nodes. This option can be repeated
+                        multiple times for multiple versions of
+                        the checkpoint sparseness. Use "none" to
+                        use no checkpoints. [default = 128]
+
+  -p  --progress        Report extra progress updates
+
 ```
 ### Example 1
 After installing Nexus, the nexus directory should look like this:
@@ -84,17 +105,21 @@ After installing Nexus, the nexus directory should look like this:
     .
     ├── build
     ├── cmake
+    ├── libdivsufsort
+    ├── longestcommonprefix
     ├── radixSA64
     ├── search_schemes
     ├── src
-    └── sux
+    ├── sux
+    ├── CMakeLists.txt
+    └── README.md
     
 In this example we will build the implicit representation of the compressed de Bruijn graph for a pan-genome of four E. coli strains. To do this, we will create an `example` folder.
 To create this folder, navigate to the nexus folder. Here, enter the following command
 ```bash
 mkdir example
 ```
-To this new directory, copy the example file found [here](https://github.com/biointec/nexus/releases/download/v1.0.0/EscherichiaColi4Strains.txt). These are four E. coli strains (accession numbers FM180568, CP000247, CP001671, and CP000468) where all non-ACGT characters were replaced accordingly. They were appended to each other with the '%' separation character in between them. The sentinel character '$' was also appended to the end of this file.
+To this new directory, copy the example file found [here](https://github.com/biointec/nexus/releases/download/v1.0.0/EscherichiaColi4Strains.txt). These are four E. coli strains (accession numbers FM180568, CP000247, CP001671, and CP000468) where all non-ACGT characters were replaced accordingly. They were appended to each other with the '%' separation character in between them. The sentinel character '$' was also appended to the end of this file. No newlines are present.
 
 
 To build the implicit representation of the compressed de Bruijn graph for a minimum node length of `k = 20`, navigate to the `build` folder and run the following command:
@@ -107,27 +132,31 @@ The index files are then written to the same folder. Your directory structure wi
     ├── build
     ├── cmake
     ├── example 
-    |   ├── EscherichiaColi4Strains.B.left 
+    |   ├── EscherichiaColi4Strains.B.left.k20 
     |   ├── EscherichiaColi4Strains.brt 
-    |   ├── EscherichiaColi4Strains.DBG 
+    |   ├── EscherichiaColi4Strains.DBG.k20 
     |   ├── EscherichiaColi4Strains.rev.bwt 
-    |   ├── EscherichiaColi4Strains.sa.bv.1 
-    |   ├── EscherichiaColi4Strains.B.right.128 
+    |   ├── EscherichiaColi4Strains.sa.bv.16
+    |   ├── EscherichiaColi4Strains.B.right.128.k20
     |   ├── EscherichiaColi4Strains.bwt 
-    |   ├── EscherichiaColi4Strains.left.map 
-    |   ├── EscherichiaColi4Strains.right.map.128 
-    |   ├── EscherichiaColi4Strains.txt 
+    |   ├── EscherichiaColi4Strains.left.map.k20 
+    |   ├── EscherichiaColi4Strains.right.map.128.k20 
+    |   ├── EscherichiaColi4Strains.compressed.txt 
     |   ├── EscherichiaColi4Strains.B.right.full.128 
     |   ├── EscherichiaColi4Strains.cct 
     |   ├── EscherichiaColi4Strains.rev.brt 
-    |   └── EscherichiaColi4Strains.sa.1
+    |   └── EscherichiaColi4Strains.sa.16
+    ├── libdivsufsort
+    ├── longestcommonprefix
     ├── radixSA64
     ├── search_schemes
     ├── src
-    └── sux
+    ├── sux
+    ├── CMakeLists.txt
+    └── README.md
 ```
 
-Congratulations! You have used Nexus to build the implicit representation of the compressed de Bruijn graph of a pan-genome of four E. coli strains!
+<!-- You have used Nexus to build the implicit representation of the compressed de Bruijn graph of a pan-genome of four E. coli strains. -->
 
 ---
 
@@ -137,65 +166,98 @@ Nexus can align reads in a fasta (`.FASTA`, `.fasta`, `.fa`) or fastq (`.fq`, `.
 To align your reads, use the following format: 
 
 ```bash
-./nexus [options] basefilename readfile.[ext]
+./nexus [options] <basefilename> <k> <readfile.[ext]>
+
+ Following input parameters are required:
+  <basefilename>      base filename of the input index
+  <k>                 the de Bruijn parameter of the index
+  <readfile.[ext]>    the file containing the input reads to be
+                      aligned (single end).
+
+ [ext]
+  one of the following: fq, fastq, FASTA, fasta, fa
+
 ```
 
-options:
+Details:
 
 ```
+ Following input parameters are required:
+  <basefilename>      base filename of the input index
+  <k>                 the de Bruijn parameter of the index
+  <readfile.[ext]>    the file containing the input reads to be
+                      aligned (single end).
+
+ [ext]
+  one of the following: fq, fastq, FASTA, fasta, fa
+
+
  [options]
- -sfr --strain-free	strain-free matching
- -e   --max-ed		maximum edit distance [default = 0]
- -s   --sa-sparseness	suffix array sparseness factor [default = 1]
- -c   --cp-sparseness	sparseness factor that indicates how many checkpoints must be stored to identify nodes. Use "none" to use no checkpoints. [default = 128]
- -f   --filter		filtering type that should be used to filter the occurrences. This option is only valid in case of strain-free matching. Options:
-	linear		linear filtering is efficient but does not filter out all redundant occurrences. Additionally, in some exceptional cases, a non-optimal replacement occurrence can be chosen. This is the default option.
-	complete	complete filtering leads to a set of occurrences with no redundancy. This option is very slow however and thus not recommended.
- -p   --partitioning		Add flag to do uniform/static/dynamic partitioning. Dynamic partitioning cannot be used with strain-free matching. [default = static]
- -m   --metric		Add flag to set distance metric (editnaive/editopt/hamming) [default = editopt]
- -ss  --search-scheme	Choose the search scheme
-  options: 
-	kuch1	Kucherov k + 1
-	kuch2	Kucherov k + 2
-	kianfar	Optimal Kianfar scheme
-	manbest	Manual best improvement for Kianfar scheme (only for ed = 4)
-	pigeon	Pigeonhole scheme
-	01*0	01*0 search scheme
-	naive	naive backtracking
-	custom	custom search scheme, the next parameter should be a path to the folder containing this search scheme
+  -e/--max-ed         maximum edit distance [default = 0]
 
-[ext]
-	one of the following: fq, fastq, FASTA, fasta, fa
-Following input files are required:
-	<base filename>.txt: input text T
-	<base filename>.cct: character counts table
-	<base filename>.sa.[saSF]: sparse suffix array, with suffix array sparseness factor [saSF] elements
-	<base filename>.sa.bv.[saSF]: bitvector indicating which elements of the suffix array are stored.
-	<base filename>.bwt: BWT of T
-	<base filename>.rev.bwt: BWT of the reverse of T
-	<base filename>.brt: Prefix occurrence table of T
-	<base filename>.rev.brt: Prefix occurrence table of the reverse of T
-	<base filename>.DBG: variable k and the compressed de Bruijn graph.
-	<base filename>.B.left: bitvector B_left for the compressed de Bruijn graph.
-	<base filename>.B.right.[cpSF]: bitvector B_right for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.B.right.full.[cpSF]: bitvector B_right_full for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.left.map: node identifier mapping corresponding to B_left.
-	<base filename>.right.map.[cpSF]: node identifier mapping corresponding to B_right, with checkpoint sparseness factor [cpSF].
+  -s/--sa-sparseness  suffix array sparseness factor [default = 16]
 
+  -c/--cp-sparseness  sparseness factor that indicates how many
+                      checkpoints must be stored to identify nodes.
+                      Use "none" to use no checkpoints. Choose a
+                      value that was also used during the building
+                      process. [default = 128]
 
+  -p/--partitioning   Add flag to do uniform/static/dynamic
+                      partitioning of the seeds for search schemes.
+                      Dynamic partitioning cannot be used with
+                      strain-free matching. [default = dynamic]
 
+  -m/--metric         Add flag to set distance metric (editnaive/
+                      editopt/ hamming) [default = editopt]
+
+  -ss/--search-scheme Choose the search scheme. Options:
+                       * kuch1    Kucherov k + 1 [default]
+                       * kuch2    Kucherov k + 2
+                       * kianfar  Optimal Kianfar scheme
+                       * manbest  Manual best improvement for Kianfar
+                                  scheme (only for ed = 4)
+                       * pigeon   Pigeonhole scheme
+                       * 01*0     01*0 search scheme
+                       * naive    naive backtracking
+                       * custom   custom search scheme, the next
+                                  parameter should be a path to the
+                                  folder containing this searchscheme
+
+  -sfr/--strain-free  strain-free matching: occurrences can be
+                      identified as any path of connected nodes. In
+                      other words, they do not have to occur exactly
+                      in one of the input genomes of the pan-genome.
+                      This is option is not activated by default and
+                      is slower than the default implementation.
+
+  -f/--filter         filtering type that should be used to filter
+                      the occurrences. This option is only valid in
+                      case of strain-free matching. Options:
+                       * linear: linear filtering is efficient but
+                         does not filter out all redundant
+                         occurrences. Additionally, in some
+                         exceptional cases, a non-optimal replacement
+                         occurrence can be chosen. This is the
+                         default option.
+                       * complete: complete filtering leads to a set
+                         of occurrences with no redundancy. This
+                         option is very slow however and thus not
+                         recommended.
     
 ```
 
-### Strain-Fixed versus Strain-Free Matching
+### Pattern Matching
 
-The `-sfr` or `--strain-free` option indicates a crucial difference in functionality. If this option is not added, Nexus defaults to strain-fixed matching. This means that only substrings of the original strains in the pan-genome can be found as occurrences. If the option is included, Nexus switches to strain-free matching. In this case, occurrences can be non-contiguous with respect to the strains in the pan-genome. In other words, an occurrence does not necessarily entirely occur in one of the original strains of the pan-genome. The choice of which type of matching is used can influence the other options as is mentioned in their description above. 
+<!-- The `-sfr` or `--strain-free` option indicates a crucial difference in functionality. If this option is not added, Nexus defaults to strain-fixed matching.  -->
 
-The matching duration, the number of index nodes visited, the number of graph nodes visited, and the number of reported/unique matches (strain-fixed) or node paths (strain-free) will be printed to stdout along with some additional metrics. For strain-fixed matching specifically, the number of reported node paths is included as an additional metric since multiple matches can correspond to the same node path. 
+<!-- If the option is included, Nexus switches to strain-free matching. In this case, occurrences can be non-contiguous with respect to the strains in the pan-genome. In other words, an occurrence does not necessarily entirely occur in one of the original strains of the pan-genome. The choice of which type of matching is used can influence the other options as is mentioned in their description above.  -->
 
-The matches will be written to a custom output file in the folder where your readfile was. This output file for strain-fixed matching will be a tab-separated file with the fields: `Identifier` (identifies the read), `SubgraphID` (identifies the node paths that were found for this read), `Path` (the node path corresponding to this occurrence), `Strain` (the number of the strain in which this occurrence lies), `Position` (the position of this occurrence in the pan-genome), `Length` (the length of this occurrence), `ED` (the edit distance of this occurrence) and `reverseComplement` (1 if this occurrence was found on the reverse complement of the reference, 0 otherwise). Similarly for strain-free matching, a tab-separated file is generated with the fields: `Identifier`, `SubgraphID`, `Path`, `DistanceFromLeftEnd`, `Length`, `ED` and `reverseComplement`. The `Strain` and `Position` fields are not present since an occurrence does not necessarily belong to one strain/correspond to a certain position in the original pan-genome anymore. The `DistanceFromLeftEnd` field is new and indicates the distance from the start of the match to the start of the first node of the node path, partly substituting the previous `Position` field. For each optimal alignment under the maximum given edit distance a line will be present. This output file will be called `readfile_output.txt`.
+In default pattern matching mode, only substrings of the original strains in the pan-genome can be found as occurrences. The matches will be written to a custom output file in the folder where your readfile was. This output file for will be a tab-separated file with the fields: `Identifier` (identifies the read), `SubgraphID` (identifies the node paths that were found for this read), `Path` (the node path corresponding to this occurrence), `DistanceFromLeftEnd` (the distance from the start of the match to the start of the first node of the node path), `Strain` (the number of the strain in which this occurrence lies), `Position` (the position of this occurrence in the pan-genome), `Length` (the length of this occurrence), `ED` (the edit distance of this occurrence) and `reverseComplement` (1 if this occurrence was found on the reverse complement of the reference, 0 otherwise). For each alignment under the maximum given edit distance a line will be present. This output file will be called `<readfile>_output.tsv`.
 
+<!-- Similarly for strain-free matching, a tab-separated file is generated with the fields: `Identifier`, `SubgraphID`, `Path`, `DistanceFromLeftEnd`, `Length`, `ED` and `reverseComplement`. The `Strain` and `Position` fields are not present since an occurrence does not necessarily belong to one strain/correspond to a certain position in the original pan-genome anymore.  -->
 
+The matching duration, the number of index nodes visited, the number of graph nodes visited, and the number of reported/unique matches and node paths will be printed to stdout along with some additional metrics. 
 
 
 
@@ -204,7 +266,7 @@ The matches will be written to a custom output file in the folder where your rea
 Consider the final directory structure from [example 1](##Example-1). 
 Copy this [file](https://github.com/biointec/nexus/releases/download/v1.0.0/EscherichiaColi4Strains.reads.fasta) to this `example` directory. 
 This file contains 100 000 reads of length 100 all sampled from the pan-genome of four E. coli strains (i.e., each read is sampled from one of the four strains). Thus, each read will have at least one exact occurrence.
-If you want to align these reads in a strain-fixed way using the Pigeonhole scheme up to an edit distance of 3 to our reference pan-genome, run the following command in the `build` folder:
+If you want to align these reads using the Pigeonhole scheme up to an edit distance of 3 to our reference pan-genome, run the following command in the `build` folder:
 ```bash
 ./nexus -e 3 -ss pigeon ../example/EscherichiaColi4Strains ../example/EscherichiaColi4Strains.reads.fasta
 ```
@@ -215,45 +277,49 @@ After this operation your directory structure will look like this:
     ├── build
     ├── cmake
     ├── example 
-    |   ├── EscherichiaColi4Strains.B.left 
+    |   ├── EscherichiaColi4Strains.B.left.k20 
     |   ├── EscherichiaColi4Strains.brt 
-    |   ├── EscherichiaColi4Strains.DBG 
+    |   ├── EscherichiaColi4Strains.DBG.k20 
     |   ├── EscherichiaColi4Strains.rev.bwt 
-    |   ├── EscherichiaColi4Strains.sa.bv.1 
-    |   ├── EscherichiaColi4Strains.B.right.128 
+    |   ├── EscherichiaColi4Strains.sa.bv.16
+    |   ├── EscherichiaColi4Strains.B.right.128.k20
     |   ├── EscherichiaColi4Strains.bwt 
-    |   ├── EscherichiaColi4Strains.left.map 
+    |   ├── EscherichiaColi4Strains.left.map.k20 
     |   ├── EscherichiaColi4Strains.reads.fasta 
-    |   ├── EscherichiaColi4Strains.reads.fasta_output.txt 
-    |   ├── EscherichiaColi4Strains.right.map.128 
-    |   ├── EscherichiaColi4Strains.txt 
+    |   ├── EscherichiaColi4Strains.reads.fasta_output.tsv 
+    |   ├── EscherichiaColi4Strains.right.map.128.k20 
+    |   ├── EscherichiaColi4Strains.compressed.txt 
     |   ├── EscherichiaColi4Strains.B.right.full.128 
     |   ├── EscherichiaColi4Strains.cct 
     |   ├── EscherichiaColi4Strains.rev.brt 
-    |   └── EscherichiaColi4Strains.sa.1
+    |   └── EscherichiaColi4Strains.sa.16
+    ├── libdivsufsort
+    ├── longestcommonprefix
     ├── radixSA64
     ├── search_schemes
     ├── src
-    └── sux
+    ├── sux
+    ├── CMakeLists.txt
+    └── README.md
 ```
 
-The results can be found in `EscherichiaColi4Strains.reads.fasta_output.txt`.
+The results can be found in `EscherichiaColi4Strains.reads.fasta_output.tsv`.
 
-To align the reads in a strain-free way, run
+<!-- To align the reads in a strain-free way, run
 ```bash
 ./nexus -sfr -e 3 -ss pigeon ../example/EscherichiaColi4Strains ../example/EscherichiaColi4Strains.reads.fasta
 ```
 
-Note that strain-free matching requires more runtime and reports a higher number of node paths. 
+Note that strain-free matching requires more runtime and reports a higher number of node paths.  -->
 
 ---
 **NOTE**
 
-This second alignment of reads will overwrite the `EscherichiaColi4Strains.reads.fasta_output.txt`. Before running a second time, make sure to back up the original file if you would like to keep it stored.
+Another alignment of the same reads would overwrite the `EscherichiaColi4Strains.reads.fasta_output.tsv`. Before running a second time, make sure to back up the original file if you would like to keep it stored.
 
 ---
 
-Congratulations! You are now able to use Nexus to align reads to a pan-genome of four E. coli strains!
+<!-- You are now able to use Nexus to align reads to a pan-genome of four E. coli strains. -->
 
 ## Custom Search Schemes
 
@@ -275,12 +341,12 @@ If you want to provide optimal static partitioning, you can create a file named 
 Similarly, to provide values for dynamic partitioning you can create a file called `dynamic_partitioning.txt`. This file should contain two lines. The first line contains percentages (again between 0 and 1) that correspond to the seeding positions, relative to the size of the pattern, of all parts, except the first and last part. 
 The second line should contain space-separated integers corresponding to the weights of each part.
 
----
+<!-- ---
 **NOTE**
 
 Dynamic partitioning is only possible in the case of strain-fixed matching.
 
----
+--- -->
 
 ### Folder Structure Example
 Consider a search scheme which supports maximal edit/hamming distances 1, 2 and 4. For distance 1 no static or dynamic partitioning values are known. For distance 2 only static partitioning values are known and for distance 4 both static and dynamic partitioning values are known. The folder structure of this search scheme should look like this:
@@ -316,52 +382,60 @@ In the `search_schemes` folder the hardcoded search schemes of Nexus are availab
 
 As part of the code of Nexus is based on [Columba 1.0](https://github.com/biointec/columba/releases/tag/v1.0), Nexus also implements lossless approximate pattern matching directly to the underlying linear reference. In this case, no node path in the pan-genome graph is found. We refer to this functionality as Nexus's built-in version of Columba.
 
-Just as all of the other functionality, it is assumed here that the linear reference is a pan-genome containing DNA characters `A`, `C`, `G` and `T`; and separation characters `$` and `%`. Both separation characters must be present to garantee correct performance.
+Just as all of the other functionality, it is assumed here that the linear reference is a pan-genome containing DNA characters `A`, `C`, `G` and `T`; and separation characters `$` and `%`. Both separation characters must be present to guarantee correct performance.
 
 Matching a read file to the linear reference text can be done by running the following command from the `build` folder.
 
 ```bash
-./columba [options] basefilename readfile.[ext]
+./columba [options] <basefilename> <readfile.[ext]>
 ```
 
-options:
+Details:
 
 ```
+ Following input parameters are required:
+  <basefilename>      base filename of the input index
+  <readfile.[ext]>    the file containing the input reads to be
+                      aligned (single end).
+
+ [ext]
+  one of the following: fq, fastq, FASTA, fasta, fa
+
  [options]
-  -e  --max-ed		maximum edit distance [default = 0]
-  -s  --sa-sparseness	suffix array sparseness factor [default = 1]
-  -p  --partitioning 	Add flag to do uniform/static/dynamic partitioning [default = dynamic]
-  -m   --metric	Add flag to set distance metric (editnaive/editopt/hamming) [default = editopt]
-  -ss --search-scheme	Choose the search scheme
-  options:
-	kuch1	Kucherov k + 1
-	kuch2	Kucherov k + 2
-	kianfar	 Optimal Kianfar scheme
-	manbest	 Manual best improvement for Kianfar scheme (only for ed = 4)
-	pigeon	 Pigeonhole scheme
-	01*0	01*0 search scheme
-	custom	custom search scheme, the next parameter should be a path to the folder containing this search scheme
+  -e/--max-ed         maximum edit distance [default = 0]
 
-[ext]
-	one of the following: fq, fastq, FASTA, fasta, fa
-Following input files are required:
-	<base filename>.txt: input text T
-	<base filename>.cct: character counts table
-	<base filename>.sa.[saSF]: suffix array sample every [saSF] elements
-	<base filename>.bwt: BWT of T
-	<base filename>.brt: Prefix occurrence table of T
-	<base filename>.rev.brt: Prefix occurrence table of the reverse of T
+  -s/--sa-sparseness  suffix array sparseness factor [default = 16]
 
+  -p/--partitioning   Add flag to do uniform/static/dynamic
+                      partitioning of the seeds for search schemes.
+                      Dynamic partitioning cannot be used with
+                      strain-free matching. [default = dynamic]
 
-    
+  -m/--metric         Add flag to set distance metric (editnaive/
+                      editopt/ hamming) [default = editopt]
+
+  -ss/--search-scheme Choose the search scheme. Options:
+                       * kuch1    Kucherov k + 1 [default]
+                       * kuch2    Kucherov k + 2
+                       * kianfar  Optimal Kianfar scheme
+                       * manbest  Manual best improvement for Kianfar
+                                  scheme (only for ed = 4)
+                       * pigeon   Pigeonhole scheme
+                       * 01*0     01*0 search scheme
+                       * naive    naive backtracking
+                       * custom   custom search scheme, the next
+                                  parameter should be a path to the
+                                  folder containing this searchscheme
 ```
 
-As a result, a custom output file is written in the folder where your readfile was. This `.txt` file contains for each occurrence the following fields: `identifier`, `Position`, `Length`, `ED` and `reverseComplement`. `identifier` identifies the read, the other fields have been discussed above.
+As a result, a custom output file is written in the folder where your readfile was. This `.txt` file contains for each occurrence the following fields: `identifier`, `Position`, `Length`, `ED` and `reverseComplement`. These fields have already been discussed above.
+
+For more information regarding columba's options, we refer to Columba's [GitHub page](https://github.com/biointec/columba). 
 
 # Visualizing Subgraphs
 We also foresee functionality to visualize node paths along with their surrounding neighborhood.
 
-The visualization functionality is implemented such that every connection between two nodes is shown separately. This means that it is possible that multiple edges have the same source and target nodes if this particular combination occurs multiple times in the pan-genome reference. Note that in the `Lossless Approximate Pattern Matching on Pan-genome de Bruijn Graphs` paper, edges are defined differently: each edge must have a different combination of source and target nodes. In other words, all parallel connections are considered together as one edge. We choose not to simplify the visualized subgraphs as such, to provide a more complete overview.
+The visualization functionality is implemented such that every connection between two nodes can be shown separately. This means that it is possible that multiple edges have the same source and target nodes if this particular combination occurs multiple times in the pan-genome reference.
 
 ## Prerequisites
 ### Cytoscape
@@ -379,7 +453,7 @@ Additionally, for smooth visualization we recommend installing `yFiles Layout Al
 To import a clear graph style, you can create a styles file using the following command (run from the `build` folder): 
 
 ```bash
-./createStyles [numberOfStrains]
+./createStyles <numberOfStrains>
 ```
 
 As a parameter, enter the number of strains that your pan-genome graph contains. This way, the edge colors are spread out nicely.
@@ -396,52 +470,81 @@ After running this program, a file `PanGenomeSubgraph.xml` is created in the `bu
 It is possible to input a DNA read, which is then matched to the pan-genome graph. The resulting occurrences are then visualized. To do so, execute the following in the `build` directory: 
 
 ```
-./visualizeRead [options] basefilename read
+/visualizeRead [options] <basefilename> <k> <read>
 ```
 
-There are pattern matching options, which are identical to the ones described above for matching read files. Additionally, two new visualization options are included.
+There are pattern matching options, which are identical to the ones described above for matching read files. Additionally, three new visualization options are included at the end.
 
 ```
- [Pattern matching options]
- -sfr --strain-free	strain-free matching
- -e   --max-ed		maximum edit distance [default = 0]
- -s   --sa-sparseness	suffix array sparseness factor [default = 1]
- -c   --cp-sparseness	sparseness factor that indicates how many checkpoints must be stored to identify nodes. Use "none" to use no checkpoints. Choose a value that was also used during the building process. [default = 128]
- -f   --filter		filtering type that should be used to filter the occurrences. This option is only valid in case of strain-free matching. Options:
-	linear		linear filtering is efficient but does not filter out all redundant occurrences. Additionally, in some exceptional cases, a non-optimal replacement occurrence can be chosen. This is the default option.
-	complete	complete filtering leads to a set of occurrences with no redundancy. This option is very slow however and thus not recommended.
- -p   --partitioning		Add flag to do uniform/static/dynamic partitioning. Dynamic partitioning cannot be used with strain-free matching. [default = static]
- -m   --metric		Add flag to set distance metric (editnaive/editopt/hamming) [default = editopt]
- -ss  --search-scheme	Choose the search scheme
-  options:
-	kuch1	Kucherov k + 1
-	kuch2	Kucherov k + 2
-	kianfar	Optimal Kianfar scheme
-	manbest	Manual best improvement for kianfar scheme (only for ed = 4)
-	pigeon	Pigeonhole scheme
-	01*0	01*0 search scheme
-	naive	naive backtracking
-	custom	custom search scheme, the next parameter should be a path to the folder containing this search scheme
+ Following input parameters are required:
+  <basefilename>      base filename of the input index
+  <k>                 the de Bruijn parameter of the index
+  <read>              the read that must be aligned and visualized.
 
- [Visualization options]
- -d   --visualization-depth		Depth of the visualized neighborhood around the paths of interest [default = 3]
- -o   --output-files		Prefix of the output files that will be created during the visualization process [default = basefilename]
 
-Following input files are required:
-	<base filename>.txt: input text T
-	<base filename>.cct: character counts table
-	<base filename>.sa.[saSF]: sparse suffix array, with suffix array sparseness factor [saSF] elements
-	<base filename>.sa.bv.[saSF]: bitvector indicating which elements of the suffix array are stored.
-	<base filename>.bwt: BWT of T
-	<base filename>.rev.bwt: BWT of the reverse of T
-	<base filename>.brt: Prefix occurrence table of T
-	<base filename>.rev.brt: Prefix occurrence table of the reverse of T
-	<base filename>.DBG: variable k and the compressed de Bruijn graph.
-	<base filename>.B.left: bitvector B_left for the compressed de Bruijn graph.
-	<base filename>.B.right.[cpSF]: bitvector B_right for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.B.right.full.[cpSF]: bitvector B_right_full for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.left.map: node identifier mapping corresponding to B_left.
-	<base filename>.right.map.[cpSF]: node identifier mapping corresponding to B_right, with checkpoint sparseness factor [cpSF].
+ [options]
+  -e/--max-ed         maximum edit distance [default = 0]
+
+  -s/--sa-sparseness  suffix array sparseness factor [default = 16]
+
+  -c/--cp-sparseness  sparseness factor that indicates how many
+                      checkpoints must be stored to identify nodes.
+                      Use "none" to use no checkpoints. Choose a
+                      value that was also used during the building
+                      process. [default = 128]
+
+  -p/--partitioning   Add flag to do uniform/static/dynamic
+                      partitioning of the seeds for search schemes.
+                      Dynamic partitioning cannot be used with
+                      strain-free matching. [default = dynamic]
+
+  -m/--metric         Add flag to set distance metric (editnaive/
+                      editopt/ hamming) [default = editopt]
+
+  -ss/--search-scheme Choose the search scheme. Options:
+                       * kuch1    Kucherov k + 1 [default]
+                       * kuch2    Kucherov k + 2
+                       * kianfar  Optimal Kianfar scheme
+                       * manbest  Manual best improvement for Kianfar
+                                  scheme (only for ed = 4)
+                       * pigeon   Pigeonhole scheme
+                       * 01*0     01*0 search scheme
+                       * naive    naive backtracking
+                       * custom   custom search scheme, the next
+                                  parameter should be a path to the
+                                  folder containing this searchscheme
+
+  -sfr/--strain-free  strain-free matching: occurrences can be
+                      identified as any path of connected nodes. In
+                      other words, they do not have to occur exactly
+                      in one of the input genomes of the pan-genome.
+                      This is option is not activated by default and
+                      is slower than the default implementation.
+
+  -f/--filter         filtering type that should be used to filter
+                      the occurrences. This option is only valid in
+                      case of strain-free matching. Options:
+                       * linear: linear filtering is efficient but
+                         does not filter out all redundant
+                         occurrences. Additionally, in some
+                         exceptional cases, a non-optimal replacement
+                         occurrence can be chosen. This is the
+                         default option.
+                       * complete: complete filtering leads to a set
+                         of occurrences with no redundancy. This
+                         option is very slow however and thus not
+                         recommended.
+
+  -d/--depth          Depth of the visualized neighborhood around the
+                      paths of interest [default = 3]
+
+  -b/--bundle-edges   Bundle edges stemming from different strains
+                      together. Recommended when many strains are
+                      present [default = false]
+
+  -o/--output-files   Prefix of the output files that will be created
+                      during the visualization process [default =
+                      basefilename]
 
 ```
 
@@ -449,7 +552,9 @@ This procedure outputs two files: `outputfilename_SubgraphOverview.tsv` and `out
 
 Note however that if your read does not occur in the graph respecting your search parameters, these two files will be empty except for the header.
 
-`outputfilename_SubgraphOverview.tsv` contains an overview of the occurrences corresponding to the input read. This overview is similar to what is reported when mapping a readfile to the graph. For strain-fixed matching, `SubgraphID`, `Path`, `Strain`, `Position`, `Length` and `ED` are reported. For strain-free matching, `SubgraphID`, `Path`, `DistanceFromLeftEnd`, `Length` and `ED` are reported. Note that only the read itself is matched to the graph, not its reverse complement.
+`outputfilename_SubgraphOverview.tsv` contains an overview of the occurrences corresponding to the input read. This overview is similar to what is reported when mapping a readfile to the graph. Fields `SubgraphID`, `Path`, `DistanceFromLeftEnd`, `Strain`, `Position`, `Length` and `ED` are reported. Note that only the read itself is matched to the graph, not its reverse complement. 
+
+<!-- For strain-free matching, `SubgraphID`, `Path`, `DistanceFromLeftEnd`, `Length` and `ED` are reported. -->
 
 `outputfilename_SubgraphEdges.tsv` contains all edges for all subgraphs and can be used to visualize the subgraphs in Cytoscape. This can be done as follows:
 * either drag the `outputfilename_SubgraphEdges.tsv` into the `Network` pane or import it as a `Network from File` via the `File` dropdown in the top menu bar. Check that the columns are interpreted by Cytoscape as follows:
@@ -463,6 +568,7 @@ Note however that if your read does not occur in the graph respecting your searc
   * OmegaFull = Target Node Attribute
   * PartOfPath = Target Node Attribute
   * Color = Edge Attribute
+  * EdgeMultiplicity = Edge Attribute
 * Select the network that is shown, then navigate to `Style` in the left menu bar
 * In the styles dropdown menu, choose `PanGenomeSubgraph` which you imported earlier
 * Select `Layout` in the top menu
@@ -474,7 +580,7 @@ You should now see a clear set of subgraphs corresponding to your input read.
 
 Use again the pan-genome from [example 1](##Example-1).
 
-If you want to align and visualize a read (e.g., `CGGCATCCAGGTCGTTAATGATGATAGTTGGTCTGGACATTTTTACTCCATGTCGTCGGTACTGCGAGTGTCGCAGATAAACATACCCAAAAGAAAACCC`) in a strain-fixed way using the Pigeonhole scheme up to an edit distance of 3 to our reference pan-genome, run the following command in the `build` folder:
+If you want to align and visualize a read (e.g., `CGGCATCCAGGTCGTTAATGATGATAGTTGGTCTGGACATTTTTACTCCATGTCGTCGGTACTGCGAGTGTCGCAGATAAACATACCCAAAAGAAAACCC`) using the Pigeonhole scheme up to an edit distance of 3 to our reference pan-genome, run the following command in the `build` folder:
 ```bash
 ./visualizeRead -e 3 -ss pigeon ../example/EscherichiaColi4Strains CGGCATCCAGGTCGTTAATGATGATAGTTGGTCTGGACATTTTTACTCCATGTCGTCGGTACTGCGAGTGTCGCAGATAAACATACCCAAAAGAAAACCC
 ```
@@ -485,19 +591,19 @@ The default neighborhood depth of 3 is used. The results can now be found in `Es
 
 The darker nodes are part of the node path. Lighter nodes are part of the neighborhood.
 
-To align the read in a strain-free way, run
+<!-- To align the read in a strain-free way, run
 ```bash
 ./visualizeRead -sfr -e 3 -ss pigeon ../example/EscherichiaColi4Strains CGGCATCCAGGTCGTTAATGATGATAGTTGGTCTGGACATTTTTACTCCATGTCGTCGGTACTGCGAGTGTCGCAGATAAACATACCCAAAAGAAAACCC
 ```
 
-No additional node paths are found for this specific read.
+No additional node paths are found for this specific read. -->
 
 ## Visualizing a Node Path
 
 You can also directly visualize a node path of interest. To do so, execute the following in the `build` directory: 
 
 ```
-./visualizePath [options] basefilename path
+./visualizePath [options] <basefilename> <k> <path>
 ```
 
 The path should be a comma-separated list of nodes (no whitespaces).
@@ -505,27 +611,35 @@ The path should be a comma-separated list of nodes (no whitespaces).
 In this case, there are similar but less options:
 
 ```
- [Visualization options]
- -d   --visualization-depth		Depth of the visualized neighborhood around the paths of interest [default = 3]
- -o   --output-files		Prefix of the output files that will be created during the visualization process [default = basefilename]
- -s   --sa-sparseness	suffix array sparseness factor [default = 1]
- -c   --cp-sparseness	sparseness factor that indicates how many checkpoints must be stored to identify nodes. Use "none" to use no checkpoints. Choose a value that was also used during the building process.[default = 128]
+ Following input parameters are required:
+  <basefilename>      base filename of the input index
+  <k>                 the de Bruijn parameter of the index
+  <path>              a comma-separated list of node identifiers
+                      (e.g., 1,9,20)
 
-Following input files are required:
-	<base filename>.txt: input text T
-	<base filename>.cct: character counts table
-	<base filename>.sa.[saSF]: sparse suffix array, with suffix array sparseness factor [saSF] elements
-	<base filename>.sa.bv.[saSF]: bitvector indicating which elements of the suffix array are stored.
-	<base filename>.bwt: BWT of T
-	<base filename>.rev.bwt: BWT of the reverse of T
-	<base filename>.brt: Prefix occurrence table of T
-	<base filename>.rev.brt: Prefix occurrence table of the reverse of T
-	<base filename>.DBG: variable k and the compressed de Bruijn graph.
-	<base filename>.B.left: bitvector B_left for the compressed de Bruijn graph.
-	<base filename>.B.right.[cpSF]: bitvector B_right for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.B.right.full.[cpSF]: bitvector B_right_full for the compressed de Bruijn graph, with checkpoint sparseness factor [cpSF].
-	<base filename>.left.map: node identifier mapping corresponding to B_left.
-	<base filename>.right.map.[cpSF]: node identifier mapping corresponding to B_right, with checkpoint sparseness factor [cpSF].
+
+ [options]
+  -e/--max-ed         maximum edit distance [default = 0]
+
+  -s/--sa-sparseness  suffix array sparseness factor [default = 16]
+
+  -c/--cp-sparseness  sparseness factor that indicates how many
+                      checkpoints must be stored to identify nodes.
+                      Use "none" to use no checkpoints. Choose a
+                      value that was also used during the building
+                      process. [default = 128]
+
+  -d/--depth          Depth of the visualized neighborhood around the
+                      paths of interest [default = 3]
+
+  -b/--bundle-edges   Bundle edges stemming from different strains
+                      together. Recommended when many strains are
+                      present [default = false]
+
+  -o/--output-files   Prefix of the output files that will be created
+                      during the visualization process [default =
+                      basefilename]
+
 
 ```
 
@@ -541,8 +655,12 @@ We now want to visualize the subgraph around node path `{551,73827}` (which was 
 ```
 
 The result can now be found in `EscherichiaColi4Strains_SubgraphEdges.tsv`. You can now visualize the subgraph in Cytoscape as described above. This should show one of the subgraphs from the image above.
-# Reproducing Results
-The results from our paper 'Lossless Approximate Pattern Matching on Pan-genome de Bruijn Graphs'<!-- [Lossless Approximate Pattern Matching on Pan-genome de Bruijn Graphs](TODO)--> can be reproduced by using the following instructions.
+
+
+
+
+<!-- # Reproducing Results
+The results from our paper 'Lossless Approximate Pattern Matching on Pan-genome de Bruijn Graphs' can be reproduced by using the following instructions.
 
 First download and compile the source code of [Nexus 1.0.0](https://github.com/biointec/nexus/releases/tag/v1.0.0).
 
@@ -686,4 +804,4 @@ To reproduce the strain-free results from Figure 3, run Nexus with checkpoint sp
 Do this for `[cp] = {8,16,...,16384 and none}`.
 
 Runtime is reported as `Total duration`.
-The memory usage of node identifier mapping `IDmapping_right` can be found by inspecting the `basefile.right.map.[cp]` file size.
+The memory usage of node identifier mapping `IDmapping_right` can be found by inspecting the `basefile.right.map.[cp]` file size. -->

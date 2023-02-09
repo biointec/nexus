@@ -31,11 +31,20 @@ void showUsage() {
     cout << "This program creates a Cytoscape styles file that can be used to "
             "visualize subgraphs. The result wil be written to the file "
             "PanGenomeSubgraph.xml in this directory.\n\n";
-    cout << "Usage: ./createStyles numberOfStrains\n\n";
+
+    cout << "Usage: ./createStyles <numberOfStrains>\n\n";
 }
 
 int main(int argc, char* argv[]) {
     int requiredArguments = 1; // number of strains
+
+    if (argc == 2) {
+        string firstArg(argv[1]);
+        if (firstArg.find("help") != std::string::npos) {
+            showUsage();
+            return EXIT_SUCCESS;
+        }
+    }
 
     if (argc != requiredArguments + 1) {
         std::cerr << "Error: one argument is required: the number of strains "
@@ -45,11 +54,6 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     std::string parameter = argv[1];
-
-    if (parameter.find("help") != std::string::npos) {
-        showUsage();
-        return EXIT_SUCCESS;
-    }
 
     uint32_t nr_of_strains = 0;
 

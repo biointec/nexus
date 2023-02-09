@@ -208,7 +208,7 @@ template <class positionClass> class FMOcc {
     }
 
     /**
-     * @brief Operator overloading. Two FMocc are equal if their position,
+     * @brief Operator overloading. Two FMOcc are equal if their position,
      * distance and shift are all equal.
      *
      * @param rhs
@@ -254,6 +254,8 @@ template <class positionClass> class FMOccSFI : public FMOcc<positionClass> {
   private:
     // The node path in the graph that corresponds to this FMOcc
     std::vector<uint32_t> nodepath;
+    // The distance of the occurrence from the left end of the start node
+    uint32_t distanceFromLeftEnd;
 
   public:
     /**
@@ -261,9 +263,14 @@ template <class positionClass> class FMOccSFI : public FMOcc<positionClass> {
      *
      * @param occ The FMOcc object on which this object will be built
      * @param nodepath The node path in the graph to be added
+     * @param distanceFromLeftEnd The distance of the occurrence from the left
+     * end of the start node
      */
-    FMOccSFI(FMOcc<positionClass> occ, const std::vector<uint32_t>& nodepath)
-        : FMOcc<positionClass>(occ), nodepath(nodepath) {
+    FMOccSFI(const FMOcc<positionClass>& occ,
+             const std::vector<uint32_t>& nodepath,
+             const uint32_t& distanceFromLeftEnd)
+        : FMOcc<positionClass>(occ), nodepath(nodepath),
+          distanceFromLeftEnd(distanceFromLeftEnd) {
     }
 
     /**
@@ -273,6 +280,16 @@ template <class positionClass> class FMOccSFI : public FMOcc<positionClass> {
      */
     const std::vector<uint32_t>& getNodePath() const {
         return nodepath;
+    }
+
+    /**
+     * @brief Get the node path in the graph
+     *
+     * @return const uint32_t& - the distance from the left end of the start
+     * node
+     */
+    const uint32_t& getDistanceFromLeftEnd() const {
+        return distanceFromLeftEnd;
     }
 };
 
@@ -352,7 +369,7 @@ class FMOccSFR : public FMOcc<FMPosSFR> {
 
     /**
      * @brief Construct a new FMOccSFR object or a strain-free approximate
-     * matche in the pan-genome compressed de Bruijn graph
+     * match in the pan-genome compressed de Bruijn graph
      *
      * @param pos the position in the pan-genome compressed de Bruijn graph of
      * this approximate match
@@ -457,7 +474,7 @@ class FMOccSFR : public FMOcc<FMPosSFR> {
     }
 
     /**
-     * @brief Static function. Object relpacement replaces thisOcc. Therefore,
+     * @brief Static function. Object replacement replaces thisOcc. Therefore,
      * the replacements attributes of thisOcc must be updated based on object
      * replacement. This is only done if object replacement is effectively
      * better than any other replacement that was found up until now (in both
@@ -471,7 +488,7 @@ class FMOccSFR : public FMOcc<FMPosSFR> {
     static setReplacementPtr setReplacement;
 
     /**
-     * @brief Static function. Object relpacement replaces thisOcc. Therefore,
+     * @brief Static function. Object replacement replaces thisOcc. Therefore,
      * the replacements attributes of thisOcc must be updated based on object
      * replacement. This is only done if object replacement is effectively
      * better than any other replacement that was found up until now (in both
@@ -534,7 +551,7 @@ class FMOccSFR : public FMOcc<FMPosSFR> {
     }
 
     /**
-     * @brief Static function. Object relpacement replaces thisOcc. Therefore,
+     * @brief Static function. Object replacement replaces thisOcc. Therefore,
      * the replacements attributes of thisOcc must be updated based on object
      * replacement. This is only done if object replacement is effectively
      * better than any other replacement that was found up until now (in both

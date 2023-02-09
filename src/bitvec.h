@@ -217,6 +217,20 @@ class Bitvec {
      */
     Bitvec(size_t N) : N(N), bv((N + 63) / 64, 0ull) {
     }
+
+    /**
+     * @brief Clear the bitvector
+     *
+     */
+    void clear() {
+        N = 0;
+        bv.clear();
+        bv.resize(0);
+        bv.shrink_to_fit();
+        counts.clear();
+        counts.resize(0);
+        counts.shrink_to_fit();
+    }
 };
 
 // ============================================================================
@@ -237,11 +251,15 @@ class BitvecIntl {
      * Allocate memory for bv and counts
      */
     void allocateMem() {
-        // free existing allocations
-        free(bv);
-        bv = NULL;
-        free(counts);
-        counts = NULL;
+        // free existing allocations if any
+        if (bv) {
+            free(bv);
+            bv = NULL;
+        }
+        if (counts) {
+            free(counts);
+            counts = NULL;
+        }
 
         if (N == 0) { // special case for N == 0
             bvSize = countsSize = 0;
@@ -421,6 +439,24 @@ class BitvecIntl {
     ~BitvecIntl() {
         free(bv);
         free(counts);
+    }
+
+    /**
+     * @brief Clear the bitvector
+     *
+     */
+    void clear() {
+        N = 0;
+        bvSize = 0;
+        countsSize = 0;
+        if (bv) {
+            free(bv);
+            bv = NULL;
+        }
+        if (counts) {
+            free(counts);
+            counts = NULL;
+        }
     }
 };
 
@@ -899,178 +935,6 @@ class BitrefNConst {
             result += (*wordRef[i] & (bitmask >> currentShift)) << currentShift;
         }
         return result;
-    }
-};
-
-// ============================================================================
-// BIT VECTOR CLASS
-// ============================================================================
-
-class BitvecN {
-
-  private:
-    size_t N;    // number of elements
-    uint8_t len; // length of entries
-    size_t bitmask;
-    std::vector<uint8_t> bv; // actual bitvector
-    // std::vector<size_t> counts; // interleaved 1st and 2nd level counts
-
-  public:
-    /**
-     * Get a bit reference at a certain position
-     * @param p Position
-     * @return Bit reference object
-     */
-    BitrefN operator[](size_t p) {
-        assert(p < N);
-        if (len == 0) {
-            return BitrefN(std::vector<uint8_t*>(), bitmask, 0);
-        }
-        size_t w = p * len / 8;
-        uint8_t b = p * len % 8;
-        std::vector<uint8_t*> words = {&bv[w]};
-        size_t extra = std::ceil((float)(len - (8 - b)) / (float)8);
-        for (size_t i = 1; i <= extra; i++) {
-            words.emplace_back(&bv[w + i]);
-        }
-        return BitrefN(words, bitmask, b);
-    }
-
-    /**
-     * Get a bit reference at a certain position
-     * @param p Position
-     * @return Bit reference object
-     */
-    const BitrefNConst operator[](size_t p) const {
-        assert(p < N);
-        if (len == 0) {
-            return BitrefNConst(std::vector<const uint8_t*>(), bitmask, 0);
-        }
-        size_t w = p * len / 8;
-        uint8_t b = p * len % 8;
-        std::vector<const uint8_t*> words = {&bv[w]};
-        size_t extra = std::ceil((float)(len - (8 - b)) / (float)8);
-        for (size_t i = 1; i <= extra; i++) {
-            words.emplace_back(&bv[w + i]);
-        }
-        return BitrefNConst(words, bitmask, b);
-    }
-
-    // /**
-    //  * Create an index for the bitvector to support fast rank operations
-    //  */
-    // void index() {
-    //     counts = std::vector<size_t>((bv.size() + 7) / 4, 0ull);
-
-    //     size_t countL1 = 0, countL2 = 0;
-    //     for (size_t w = 0, q = 0; w < bv.size(); w++) {
-    //         if (w % 8 == 0) { // store the L1 counts
-    //             countL1 += countL2;
-    //             counts[q] = countL1;
-    //             countL2 = __builtin_popcountll(bv[w]);
-    //             q += 2;
-    //         } else { // store the L2 counts
-    //             counts[q - 1] |= (countL2 << (((w % 8) - 1) * 9));
-    //             countL2 += __builtin_popcountll(bv[w]);
-    //         }
-    //     }
-    // }
-
-    // /**
-    //  * Get the number of 1-bits within the range [0...p[ (preceding pos p)
-    //  * @param p Position
-    //  */
-    // size_t rank(size_t p) const {
-    //     assert(p < N);
-    //     size_t w = p / 64;      // word index
-    //     size_t b = p % 64;      // bit offset
-    //     size_t q = (w / 8) * 2; // counts index
-
-    //     // add the first-level counts
-    //     size_t rv = counts[q];
-
-    //     // add the second-level counts
-    //     int64_t t = (w % 8) - 1;
-    //     rv += counts[q + 1] >> (t + (t >> 60 & 8)) * 9 & 0x1FF;
-
-    //     // add the popcount in the final word
-    //     return rv + __builtin_popcountll((bv[w] << 1) << (63 - b));
-    // }
-
-    /**
-     * Write the bitvector to an open filestream
-     * @param ofs Open output filestream
-     */
-    void write(std::ofstream& ofs) const {
-        ofs.write((char*)&len, sizeof(len));
-        ofs.write((char*)bv.data(), bv.size() * sizeof(uint8_t));
-        // ofs.write((char*)counts.data(), counts.size() * sizeof(size_t));
-    }
-
-    /**
-     * Read the bitvector from an open filestream
-     * @param ifs Open input filestream
-     */
-    void read(std::ifstream& ifs, size_t size) {
-        N = size;
-
-        ifs.read((char*)&len, sizeof(len));
-
-        bv.resize((N * len + 7) / 8);
-        ifs.read((char*)bv.data(), bv.size() * sizeof(uint8_t));
-
-        bitmask = std::pow(2, len) - 1;
-
-        // counts.resize((bv.size() + 7) / 4);
-        // ifs.read((char*)counts.data(), counts.size() * sizeof(size_t));
-    }
-
-    /**
-     * Return the number of elements of the bitvector
-     * @return The number of elements of the bitvector
-     */
-    size_t nrOfElements() const {
-        return N;
-    }
-
-    /**
-     * Return the length of the elements of the bitvector
-     * @return The length of the elements of the bitvector
-     */
-    uint8_t elementLength() const {
-        return len;
-    }
-
-    /**
-     * Return the size of the bitvector
-     * @return The size of the bitvector
-     */
-    size_t size() const {
-        return N * len;
-    }
-
-    /**
-     * Default constructor, move constructor and move assignment operator
-     */
-    BitvecN() : N(0), len(0){};
-
-    // // TODO do we need the code below? It gives errors
-    // BitvecN(BitvecN&& rhs) = default;
-    // BitvecN& operator=(BitvecN&& rhs) = default;
-
-    // /**
-    //  * Deleted copy constructor and copy assignment operator
-    //  */
-    // BitvecN(const BitvecN&) = delete;
-    // BitvecN& operator=(const BitvecN&) = delete;
-
-    /**
-     * Constructor
-     * @param N Number of bits in the bitvector
-     */
-    BitvecN(size_t N)
-        : N(N), len(std::ceil(std::log2(N))), bitmask(std::pow(2, len) - 1),
-          bv((N * len + 7) / 8, 0) {
     }
 };
 

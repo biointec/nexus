@@ -23,6 +23,7 @@
 #pragma once
 
 #include "range.h"
+#include <vector>
 
 // ============================================================================
 // CLASS TextOccurrence
@@ -50,7 +51,7 @@ class TextOccurrence {
     /**
      * @brief Generates the output of this occurrence, for now in format:
      * startposition\twidth\tdistance, where startposition is the beginning of
-     * the textoccurrence, width is the length of this occurrence, distance is
+     * the text occurrence, width is the length of this occurrence, distance is
      * the (edit or hamming) distance to the mapped read.
      *
      */
@@ -144,6 +145,9 @@ class TextOccurrenceSFI : public TextOccurrence {
     std::vector<uint32_t> nodepath;
     // The strain in the pan-genome to which this TextOccurrence belongs
     int strain;
+    // The distance from the left end of the start node to the start of the
+    // occurrence
+    uint32_t distanceFromLeftEnd;
 
   public:
     /**
@@ -153,10 +157,13 @@ class TextOccurrenceSFI : public TextOccurrence {
      * @param distance the distance to this range (edit or hamming)
      * @param nodepath the node path in the graph
      * @param strain the strain in the pan-genome
+     * @param distanceFromLeftEnd The distance from the left end of the start
+     * node to the start of the occurrence
      */
     TextOccurrenceSFI(Range range, int distance, std::vector<uint32_t> nodepath,
-                      int strain)
-        : TextOccurrence(range, distance), nodepath(nodepath), strain(strain) {
+                      int strain, uint32_t distanceFromLeftEnd)
+        : TextOccurrence(range, distance), nodepath(nodepath), strain(strain),
+          distanceFromLeftEnd(distanceFromLeftEnd) {
     }
 
     /**
@@ -175,5 +182,16 @@ class TextOccurrenceSFI : public TextOccurrence {
      */
     const int& getStrain() const {
         return strain;
+    }
+
+    /**
+     * @brief Get the distance from the left end of the first node in the
+     * pan-genome
+     *
+     * @return const uint32_t& - the distance from the left end of the first
+     * node in the pan-genome
+     */
+    const uint32_t& getDistanceFromLeftEnd() const {
+        return distanceFromLeftEnd;
     }
 };

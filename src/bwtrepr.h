@@ -27,6 +27,7 @@
 
 #include "alphabet.h"
 #include "bitvec.h"
+#include "encodedtext.h"
 #include "selectinterface.h"
 
 // ============================================================================
@@ -67,6 +68,30 @@ class BWTRepr {     // e.g. S = 5 for DNA (A,C,G,T + $)
             }
 
             for (size_t cIdx = sigma.c2i(BWT[i]); cIdx < S; cIdx++)
+                bv(cIdx - 1, i) = true;
+        }
+
+        bv.index();
+    }
+
+    /**
+     * Constructor
+     * @param sigma Alphabet
+     * @param BWT Encoded Burrows-Wheeler transformation
+     */
+    BWTRepr(const Alphabet<S>& sigma, const EncodedText<S>& BWT)
+        : bv(BWT.size() + 1), dollarPos(BWT.size()) {
+        // The $-character (cIdx == 0) is not encoded in the bitvector.
+        // Hence, use index cIdx-1 in the bitvector.
+
+        for (size_t i = 0; i < BWT.size(); i++) {
+            if (BWT[i] == 0) {
+                // smallest character is sentinel
+                dollarPos = i;
+                continue;
+            }
+
+            for (size_t cIdx = BWT[i]; cIdx < S; cIdx++)
                 bv(cIdx - 1, i) = true;
         }
 
@@ -134,6 +159,14 @@ class BWTRepr {     // e.g. S = 5 for DNA (A,C,G,T + $)
         bv.read(ifs);
 
         return true;
+    }
+
+    /**
+     * @brief Clear the bit vectors
+     *
+     */
+    void clear() {
+        bv.clear();
     }
 };
 

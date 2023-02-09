@@ -53,9 +53,6 @@ struct Node {
     // left boundary of the suffix interval in the reverse SA of the k-length
     // suffix of the substring corresponding to the node
     length_t left_kmer_reverse;
-    // Mapping of regular and reverse ranks of edges passing through the node.
-    // Specifically, regular ranks are mapped to revers ranks.
-    BitvecN edgeMapping;
     // for visualization
     bool visited = false;
 
@@ -65,7 +62,7 @@ struct Node {
      */
     Node()
         : len(0), multiplicity(0), left_kmer_forward(0), right_kmer_forward(0),
-          right_kmer_reverse(0), left_kmer_reverse(0), edgeMapping(0) {
+          right_kmer_reverse(0), left_kmer_reverse(0) {
     }
 
     /**
@@ -90,13 +87,13 @@ struct Node {
           left_kmer_forward(left_kmer_forward),
           right_kmer_forward(right_kmer_forward),
           right_kmer_reverse(right_kmer_reverse),
-          left_kmer_reverse(left_kmer_reverse), edgeMapping(multiplicity) {
+          left_kmer_reverse(left_kmer_reverse) {
     }
 
     /**
      * @brief Writes the node to a file
      *
-     * @param ofs output strean
+     * @param ofs output stream
      * @return std::ofstream& - output stream
      */
     std::ofstream& write(std::ofstream& ofs) {
@@ -106,7 +103,6 @@ struct Node {
         ofs.write((char*)&right_kmer_forward, sizeof(right_kmer_forward));
         ofs.write((char*)&right_kmer_reverse, sizeof(right_kmer_reverse));
         ofs.write((char*)&left_kmer_reverse, sizeof(left_kmer_reverse));
-        edgeMapping.write(ofs);
         return ofs;
     }
 
@@ -123,7 +119,6 @@ struct Node {
         ifs.read((char*)&right_kmer_forward, sizeof(right_kmer_forward));
         ifs.read((char*)&right_kmer_reverse, sizeof(right_kmer_reverse));
         ifs.read((char*)&left_kmer_reverse, sizeof(left_kmer_reverse));
-        edgeMapping.read(ifs, multiplicity);
         visited = false;
         return ifs;
     }

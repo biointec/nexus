@@ -54,12 +54,27 @@ class SparseSuffixArray {
         return sparseSA[bitvector.rank(i)];
     }
 
-    SparseSuffixArray(const std::vector<length_t>& sa,
-                      const length_t sparseNessFactor)
+    SparseSuffixArray(const int64_t* sa, const length_t sparseNessFactor,
+                      const length_t textLength)
         : sparseNessFactor(sparseNessFactor) {
-        bitvector = Bitvec(sa.size());
-        sparseSA.reserve(sa.size() / sparseNessFactor);
-        for (length_t i = 0; i < sa.size(); i++) {
+        bitvector = Bitvec(textLength);
+        sparseSA.reserve(textLength / sparseNessFactor);
+        for (length_t i = 0; i < textLength; i++) {
+            const auto& el = sa[i];
+            if (el % sparseNessFactor == 0) {
+                sparseSA.emplace_back(el);
+                bitvector[i] = true;
+            }
+        }
+        bitvector.index();
+    }
+
+    SparseSuffixArray(const length_t* sa, const length_t sparseNessFactor,
+                      const length_t textLength)
+        : sparseNessFactor(sparseNessFactor) {
+        bitvector = Bitvec(textLength);
+        sparseSA.reserve(textLength / sparseNessFactor);
+        for (length_t i = 0; i < textLength; i++) {
             const auto& el = sa[i];
             if (el % sparseNessFactor == 0) {
                 sparseSA.emplace_back(el);
@@ -109,6 +124,14 @@ class SparseSuffixArray {
             ofs.write((char*)sparseSA.data(),
                       sparseSA.size() * sizeof(length_t));
         }
+    }
+
+    void clear() {
+        sparseNessFactor = 0;
+        bitvector.clear();
+        sparseSA.clear();
+        sparseSA.resize(0);
+        sparseSA.shrink_to_fit();
     }
 };
 

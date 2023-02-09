@@ -20,11 +20,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.     *
  ******************************************************************************/
 
-#include "benchmarking.h"
-#include "searchstrategy.h"
+// #include "benchmarking.h"
+// #include "searchstrategy.h"
 #include "strainfreemapper.h"
 
-#include <sstream>
+using namespace std;
 
 /**
  * @brief Show the usage in terminal
@@ -33,38 +33,25 @@
 void showUsage() {
     cout <<
 
-        "This program visualizes a node, a node path or a set of nodes of\n"
-        "interest.\n\n\n"
+        "This program reports some statistics regarding the pan-genome graph\n"
+        "topology.\n\n\n"
 
-        "Usage: ./visualizePath [options] <basefilename> <k> <path>\n\n"
+        "Usage: ./nexusStats [options] <basefilename> <k> \n\n"
 
         " Following input parameters are required:\n"
         "  <basefilename>      base filename of the input index\n"
-        "  <k>                 the de Bruijn parameter of the index\n"
-        "  <path>              a comma-separated list of node identifiers\n"
-        "                      (e.g., 1,9,20)\n\n\n"
+        "  <k>                 the de Bruijn parameter of the index\n\n\n"
 
         " [options]\n"
-        "  -e/--max-ed         maximum edit distance [default = 0]\n\n"
 
-        "  -s/--sa-sparseness  suffix array sparseness factor [default = "
-        "16]\n\n"
+        "  -s/--sa-sparseness  suffix array sparseness factor [default =\n"
+        "                      256 to limit memory usage]\n\n"
 
         "  -c/--cp-sparseness  sparseness factor that indicates how many\n"
         "                      checkpoints must be stored to identify nodes.\n"
         "                      Use \"none\" to use no checkpoints. Choose a\n"
         "                      value that was also used during the building\n"
-        "                      process. [default = 128]\n\n"
-        "  -d/--depth          Depth of the visualized neighborhood around "
-        "the\n"
-        "                      paths of interest [default = 3]\n\n"
-        "  -b/--bundle-edges   Bundle edges stemming from different strains\n"
-        "                      together. Recommended when many strains are\n"
-        "                      present [default = false]\n\n"
-        "  -o/--output-files   Prefix of the output files that will be "
-        "created\n"
-        "                      during the visualization process [default =\n"
-        "                      basefilename]\n\n\n"
+        "                      process. [default = 128]\n\n\n"
 
         " Following input files are required:\n"
         "  <basefilename>.compressed.txt:           compressed version of the\n"
@@ -114,7 +101,7 @@ void showUsage() {
 
 int main(int argc, char* argv[]) {
 
-    int requiredArguments = 3; // baseFile of files, k and the node path
+    int requiredArguments = 2; // baseFile of files and k
 
     if (argc == 2) {
         string firstArg(argv[1]);
@@ -130,30 +117,16 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    cout << "Welcome to Nexus!\n";
-
-    string visDepthString = "3";
-    string outputFile = "";
+    string saSparse = "256";
     string cpSparse = "128";
-    string saSparse = "16";
-    bool separateEdges = true;
 
     // process optional arguments
     for (int i = 1; i < argc - requiredArguments; i++) {
         const string& arg = argv[i];
 
-        if (arg == "-d" || arg == "--depth") {
+        if (arg == "-s" || arg == "--sa-sparseness") {
             if (i + 1 < argc) {
-                visDepthString = argv[++i];
-
-            } else {
-                throw runtime_error(arg + " takes 1 argument as input");
-            }
-        } else if (arg == "-b" || arg == "--bundle-edges") {
-            separateEdges = false;
-        } else if (arg == "-o" || arg == "--output-files") {
-            if (i + 1 < argc) {
-                outputFile = argv[++i];
+                saSparse = argv[++i];
 
             } else {
                 throw runtime_error(arg + " takes 1 argument as input");
@@ -165,19 +138,18 @@ int main(int argc, char* argv[]) {
             } else {
                 throw runtime_error(arg + " takes 1 argument as input");
             }
-        } else if (arg == "-s" || arg == "--sa-sparseness") {
-            if (i + 1 < argc) {
-                saSparse = argv[++i];
-
-            } else {
-                throw runtime_error(arg + " takes 1 argument as input");
-            }
-        } else {
-            cerr << "Unknown argument: " << arg << " is not an option" << endl;
-            return EXIT_FAILURE;
         }
     }
-    length_t visDepth = stoi(visDepthString);
+
+    string baseFile = argv[argc - 2];
+    uint k = atoi(argv[argc - 1]);
+    length_t saSF = stoi(saSparse);
+    if (saSF == 0 || saSF > 256 || (saSF & (saSF - 1)) != 0) {
+        cerr << saSF
+             << " is not allowed as sparse factor, should be in 2^[0, 8]"
+             << endl;
+        return EXIT_FAILURE;
+    }
     length_t cpSF;
     if (cpSparse == "none") {
         cpSF = INT32_MAX;
@@ -190,44 +162,52 @@ int main(int argc, char* argv[]) {
             return EXIT_FAILURE;
         }
     }
-    length_t saSF = stoi(saSparse);
-    if (saSF == 0 || saSF > 256 || (saSF & (saSF - 1)) != 0) {
-        cerr << saSF
-             << " is not allowed as sparse factor, should be in 2^[0, 8]"
-             << endl;
-        return EXIT_FAILURE;
+
+    cout << "Welcome to Nexus Stats!\n";
+
+    FMIndexDBG<FMPos> bwt(baseFile, saSF, cpSF, k, false);
+
+    uint32_t numberOfNodes = 0;
+    uint64_t numberOfEdges = 0;
+    uint64_t totalLength = 0;
+    uint64_t totalMultiplicity = 0;
+    vector<uint32_t> lengths;
+    vector<uint32_t> multiplicities;
+
+    bwt.stats(numberOfNodes, numberOfEdges, totalLength, totalMultiplicity,
+              lengths, multiplicities);
+
+    uint32_t medianLength;
+
+    sort(lengths.begin(), lengths.end());
+    if (lengths.size() % 2 == 0) {
+        medianLength =
+            (lengths[lengths.size() / 2 - 1] + lengths[lengths.size() / 2]) / 2;
+    } else {
+        medianLength = lengths[lengths.size() / 2];
     }
 
-    string baseFile = argv[argc - 3];
-    uint k = atoi(argv[argc - 2]);
-    string pathString = argv[argc - 1];
+    uint32_t medianMultiplicity;
 
-    if (outputFile == "") {
-        outputFile = baseFile;
+    sort(multiplicities.begin(), multiplicities.end());
+    if (multiplicities.size() % 2 == 0) {
+        medianMultiplicity = (multiplicities[multiplicities.size() / 2 - 1] +
+                              multiplicities[multiplicities.size() / 2]) /
+                             2;
+    } else {
+        medianMultiplicity = multiplicities[multiplicities.size() / 2];
     }
 
-    cout << "Start creation of BWT approximate matcher on graphs" << endl;
-
-    FMIndexDBG<FMPosSFR> bwt(baseFile, saSF, cpSF, k);
-
-    std::vector<uint32_t> path;
-
-    try {
-        std::stringstream ss(pathString);
-
-        for (size_t i; ss >> i;) {
-            path.push_back(i);
-            if (ss.peek() == ',')
-                ss.ignore();
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Something went wrong whilst parsing the node path."
-                  << '\n';
-    }
-
-    bwt.getText();
-
-    bwt.visualizeSubgraph(path, visDepth, outputFile, separateEdges);
+    cout << "Total no. graph nodes: " << numberOfNodes << "\n";
+    cout << "Total no. graph edges: " << numberOfEdges << "\n";
+    cout << "Total node multiplicity: " << totalMultiplicity << "\n";
+    cout << "Average node multiplicity: "
+         << totalMultiplicity / (double)(numberOfNodes) << endl;
+    cout << "Median node multiplicity: " << medianMultiplicity << endl;
+    cout << "Total node length: " << totalLength << "\n";
+    cout << "Average node length: " << totalLength / (double)(numberOfNodes)
+         << endl;
+    cout << "Median node length: " << medianLength << endl;
 
     cout << "Bye...\n";
 }

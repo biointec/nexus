@@ -29,7 +29,7 @@
 
 typedef uint64_t length_t;
 
-void readText(const std::string& filename, std::string& buf);
+void readTextOriginal(const std::string& filename, std::string& buf);
 
 void readSATextMode(const std::string& filename, std::vector<length_t>& sa,
                     size_t saSizeHint);

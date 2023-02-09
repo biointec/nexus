@@ -152,7 +152,6 @@ bool SearchStrategy<T, positionClass>::coversPatterns(
     // and error pattern is simply a vector containing
     // the number of errors in each partition P
     for (const Pattern& pattern : patterns) {
-        int numberOfCovers = 0;
 
         // check if a search covers the pattern
         bool patternCovered = false;
@@ -172,7 +171,6 @@ bool SearchStrategy<T, positionClass>::coversPatterns(
 
             // print the pattern and the search that covers it
             if (thisCover) {
-                numberOfCovers++;
                 numCover[si]++;
 
                 if (verbose) {
@@ -498,15 +496,19 @@ SearchStrategyDBG<T, positionClass>::matchApproxSFI(const string& pattern,
     SearchStrategy<T, positionClass>::index.resetCounters();
 
     if (maxED == 0) {
-        SearchStrategy<T, positionClass>::index.setDirection(BACKWARD);
-        auto result =
-            SearchStrategy<T, positionClass>::index.ExactMatchSFI(pattern);
-        std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>> paths;
-        for (auto occ : result) {
-            occ.generateOutput();
-            paths[occ.getNodePath()].push_back(occ);
+        SARangePair finalRange =
+            SearchStrategy<T, positionClass>::index.matchStringBidirectionally(
+                pattern);
+        if (!finalRange.empty()) {
+            positionClass finalPos =
+                positionClass(finalRange, pattern.size(), pattern.size());
+            FMOcc<positionClass> finalOcc(finalPos, 0);
+            vector<FMOcc<positionClass>> occs = {finalOcc};
+            return SearchStrategy<T, positionClass>::index
+                .mapOccurrencesInSAToOccurrencesInTextSFI(occs, maxED);
+        } else {
+            return {};
         }
-        return paths;
     }
     // create the parts of the pattern
     vector<Substring> parts;
@@ -662,22 +664,22 @@ void CustomSearchStrategy<T, positionClass>::getSearchSchemeFromFolder(
         if (stream_static) {
             // a file with static partitioning positions exists
             getline(stream_static, line);
-            vector<string> postionsAsString = {};
+            vector<string> positionsAsString = {};
             stringstream ss(line);
             string token;
             while (ss >> token) {
-                postionsAsString.push_back(token);
+                positionsAsString.push_back(token);
             }
 
-            if ((int)postionsAsString.size() != calculateNumParts(i) - 1) {
+            if ((int)positionsAsString.size() != calculateNumParts(i) - 1) {
                 throw runtime_error(
                     "Not enough static positions provided in " + pathToFolder +
                     to_string(i) + "/static_partitioning.txt\nExpected: " +
                     to_string(calculateNumParts(i) - 1) + " parts\nProvided: " +
-                    to_string(postionsAsString.size()) + " parts");
+                    to_string(positionsAsString.size()) + " parts");
             }
 
-            for (auto str : postionsAsString) {
+            for (auto str : positionsAsString) {
                 staticPositions[i - 1].push_back(stod(str));
             }
 

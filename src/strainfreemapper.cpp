@@ -42,6 +42,11 @@ StrainFreeMapper::matchApproxSFR(const std::string& pattern,
         std::vector<FMOccSFR> result = {};
         if (pos.isValid()) {
             pos.setNodePath(nodePathRight);
+            if (pos.getNodePath().empty()) {
+                vector<uint32_t> nodePath;
+                strategy->index.findNodeUnderK(pos, 0, nodePath);
+                pos.setNodePath(nodePath);
+            }
             FMOccSFR occ(pos, 0);
             result.emplace_back(occ);
         }

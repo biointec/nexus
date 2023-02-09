@@ -31,6 +31,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 
 namespace sux {
 
