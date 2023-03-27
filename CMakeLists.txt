@@ -31,8 +31,8 @@ target_link_libraries(nexus AuxiliaryClasses )
 add_executable(nexusStats src/mainstats.cpp)
 target_link_libraries(nexusStats AuxiliaryClasses )
 
-add_executable(nexusBuild src/buildDBG.cpp)
-target_link_libraries(nexusBuild AuxiliaryClasses )
+add_executable(nexusBuild src/buildDBG.cpp src/toACGT.cpp)
+target_link_libraries(nexusBuild AuxiliaryClasses)
 
 add_executable(createStyles src/createStyles.cpp)
 

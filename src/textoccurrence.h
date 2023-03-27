@@ -161,8 +161,8 @@ class TextOccurrenceSFI : public TextOccurrence {
      * node to the start of the occurrence
      */
     TextOccurrenceSFI(Range range, int distance, std::vector<uint32_t> nodepath,
-                      int strain, uint32_t distanceFromLeftEnd)
-        : TextOccurrence(range, distance), nodepath(nodepath), strain(strain),
+                      uint32_t distanceFromLeftEnd)
+        : TextOccurrence(range, distance), nodepath(nodepath), strain(-1),
           distanceFromLeftEnd(distanceFromLeftEnd) {
     }
 
@@ -182,6 +182,15 @@ class TextOccurrenceSFI : public TextOccurrence {
      */
     const int& getStrain() const {
         return strain;
+    }
+
+    /**
+     * @brief Set the strain this occurrence stems from
+     *
+     * @param strain
+     */
+    void setStrain(const int& strain) {
+        this->strain = strain;
     }
 
     /**

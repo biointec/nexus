@@ -49,14 +49,20 @@ thread_local length_t FMIndex<positionClass>::redundantNodePathsCounter;
 // ----------------------------------------------------------------------------
 
 template <class positionClass>
-void FMIndexDBG<positionClass>::createFMIndex(
-    const std::string& baseFN, const std::vector<int>& sparse_sa) {
+void FMIndexDBG<positionClass>::createFMIndex(const std::string& baseFN,
+                                              const std::vector<int>& sparse_sa,
+                                              string& buf) {
     // read the text file from disk
     std::cout << "Reading " << baseFN << ".txt..." << std::endl;
 
-    // Store the full text in a temporary buffer
-    string buf;
-    readTextOriginal(baseFN, buf);
+    bool fastaInput = true;
+    // If the buffer is empty, the index is not built from fasta files, but from
+    // a preprocessed text file
+    if (buf.empty()) {
+        fastaInput = false;
+        // Store the full text in a temporary buffer
+        readTextOriginal(baseFN, buf);
+    }
 
     // Find the length of the original text
     textLength = (buf[buf.size() - 1] == '\n') ? buf.size() - 1 : buf.size();
@@ -95,6 +101,17 @@ void FMIndexDBG<positionClass>::createFMIndex(
     }
 
     if (nUniqueChar < ALPHABET) {
+        // Check if % is the character that is missing
+        if (charCounts[37] == 0) {
+            // The input should be a pan-genome with multiple strains for the
+            // code to work.
+            throw runtime_error(
+                "Error: only one strain is present in the reference. As Nexus "
+                "is tailored towards working with pan-genomes, matching "
+                "patterns to one strain is currently not supported. If you "
+                "really need this functionality though, then an empty strain "
+                "should be added to resolve this issue.");
+        }
         std::cout << "WARNING: the number of unique characters in the "
                   << "text is less than the ALPHABET size specified when "
                   << "Nexus was compiled. Performance may be affected\n";
@@ -141,9 +158,16 @@ void FMIndexDBG<positionClass>::createFMIndex(
     // sanityCheck(text, SA);
     // std::cout << "\tSanity checks OK" << std::endl;
 
-    buf.clear();
-    buf.resize(0);
-    buf.shrink_to_fit();
+    // If the index is built from fasta files, then we don't clear the buffer
+    // because otherwise all of the preprocessing should be redone. So building
+    // the index from a preprocessed text is somewhat more memory-efficient
+    // right now.
+    if (!fastaInput) {
+        // Clear the buffer to save space
+        buf.clear();
+        buf.resize(0);
+        buf.shrink_to_fit();
+    }
 
     // build the BWT
     std::cout << "Generating BWT..." << std::endl;
@@ -184,10 +208,14 @@ void FMIndexDBG<positionClass>::createFMIndex(
     std::cout << "Reversing the original text...\n";
     startTime = clock();
 
-    readTextOriginal(baseFN, buf);
+    // If we are not working with fasta files, then the buffer was cleared to
+    // save space. So the text should be read from memory again.
+    if (!fastaInput) {
+        readTextOriginal(baseFN, buf);
 
-    if (newLine) {
-        buf.pop_back();
+        if (newLine) {
+            buf.pop_back();
+        }
     }
 
     reverse(buf.begin(), buf.end());
@@ -1007,7 +1035,7 @@ FMIndexDBG<positionClass>::convertToMatchesInTextSFI(
         length_t endPos = startPos + patternLength;
 
         textMatches.emplace_back(Range(startPos, endPos), distance, nodepath,
-                                 findStrain(startPos), distanceFromLeftEnd);
+                                 distanceFromLeftEnd);
     }
     return textMatches;
 }
@@ -1203,9 +1231,11 @@ int FMIndexDBG<positionClass>::findStrain(length_t input) const {
         throw std::runtime_error(
             "Binary search for strain: this input is not allowed");
     }
+    // Take an educated first guess
+    length_t avgLength = textLength / numberOfStrains;
+    int i = input / avgLength;
     // Use binary search to find the correct strain
     while (b < e) {
-        int i = floor((b + e) / 2);
         if (sorted_startpositions[i] <= input &&
             sorted_startpositions[i + 1] > input) {
             return i;
@@ -1214,6 +1244,7 @@ int FMIndexDBG<positionClass>::findStrain(length_t input) const {
         } else {
             b = i;
         }
+        i = floor((b + e) / 2);
     }
     throw std::runtime_error("Could not finish binary search for strain");
 }
@@ -1262,7 +1293,9 @@ FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
         std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>> paths;
         for (const auto& mOcc : m) {
             paths[mOcc.getNodePath()].emplace_back(mOcc);
-            paths[mOcc.getNodePath()].back().generateOutput();
+            auto& newOcc = paths[mOcc.getNodePath()].back();
+            newOcc.generateOutput();
+            newOcc.setStrain(findStrain(newOcc.getRange().getBegin()));
         }
         for (const auto& myPair : paths) {
             sort(paths[myPair.first].begin(), paths[myPair.first].end());
@@ -1320,12 +1353,11 @@ FMIndexDBG<positionClass>::mapOccurrencesInSAToOccurrencesInTextSFI(
 
         nonRedundantOcc.emplace_back(o);
     }
-    for (TextOccurrence& occ : nonRedundantOcc) {
-        occ.generateOutput();
-    }
 
     std::map<std::vector<uint32_t>, std::vector<TextOccurrenceSFI>> paths;
-    for (TextOccurrenceSFI occ : nonRedundantOcc) {
+    for (TextOccurrenceSFI& occ : nonRedundantOcc) {
+        occ.generateOutput();
+        occ.setStrain(findStrain(occ.getRange().getBegin()));
         paths[occ.getNodePath()].emplace_back(occ);
     }
     auto finish = chrono::high_resolution_clock::now();

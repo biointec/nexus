@@ -1,24 +1,12 @@
 # Nexus
 Pan-genome compacted de Bruijn graph using the Bidirectional FM-index with support for lossless approximate pattern matching using search schemes and subgraph visualization. 
 
-<!--- TODO: reference paper 
-Columba was introduced in our [paper](https://doi.org/10.1016/j.isci.2021.102687). If you find this code useful in your research, please cite: 
+Nexus was introduced in [this preprint](https://doi.org/10.21203/rs.3.rs-2583159/v1). If you find this code useful in your research, please cite: 
 ```
-@article{RENDERS2021102687,
-title = {Dynamic partitioning of search patterns for approximate pattern matching using search schemes},
-journal = {iScience},
-volume = {24},
-number = {7},
-pages = {102687},
-year = {2021},
-issn = {2589-0042},
-doi = {https://doi.org/10.1016/j.isci.2021.102687},
-url = {https://www.sciencedirect.com/science/article/pii/S2589004221006556},
-author = {Luca Renders and Kathleen Marchal and Jan Fostier},
-keywords = {Algorithms, Bioinformatics, Computer science, High-performance computing in bioinformatics},
-```--->
+Lore Depuydt, Luca Renders, Thomas Abeel et al. Pan-genome de Bruijn Graph using the Bidirectional FM-index, 22 February 2023, PREPRINT (Version 1) available at Research Square [https://doi.org/10.21203/rs.3.rs-2583159/v1]
+```
 
-**Important:** To use Nexus v1.1.0 instead of v1.0.0, the index must be rebuilt. 
+**Important:** To use Nexus v1.1.0 or higher instead of v1.0.0, the index must be rebuilt. 
 
 These instructions will get you a copy of the project up and running on your local machine.
 
@@ -55,7 +43,7 @@ cmake ..
 make 
 ```
 # Usage:
-Nexus aligns reads to a compressed pan-genome de Bruijn graph. To do this you need to build the implicit representation of this graph, along with the underlying bidirectional FM-index, based on the input data. Currently we only support input data with an alphabet of length 6 (for DNA: A, C, G, T + separation characters: $, %). Both separation characters must be present to guarantee correct functionality. In other words, at least two genome strains should be included.
+Nexus aligns reads to a compressed pan-genome de Bruijn graph. To do this you need to build the implicit representation of this graph, along with the underlying bidirectional FM-index, based on the input data. Currently we only support input data with an alphabet of length 6 (for DNA: A, C, G, T + separation characters: $, %). Both separation characters must be present to guarantee correct functionality. In other words, at least two genome strains should be included. As of Nexus v1.1.1, the index can be built from fasta files immediately.
 
 Nexus integrates code from five external repositories:
 * [Columba](https://github.com/biointec/columba) is the base of the search schemes implementation
@@ -72,17 +60,51 @@ To build the implicit representation of the compressed de Bruijn graph, run the 
 ./nexusBuild <base filename> <k_list>
 ```
 
-The basefile parameter demonstrates where the search text can be found. The k_list parameter determines for which de Bruijn parameters de graph must be built (i.e., the minimum node lengths of the compressed de Bruijn graph). 
+The basefile parameter determines where the index will be stored, and possibly also where the input text can be found (in case it was already preprocessed). Alternatively, the index can also be built immediately from fasta files (Nexus v1.1.1 or higher). The k_list parameter determines for which de Bruijn parameters de graph must be built (i.e., the minimum node lengths of the compressed de Bruijn graph). 
 
-Options:
+Details:
 
 ```
-[options]
+ Following input parameters are required:
+  <base filename>       base filename of the output index and
+                        possibly the input text if it was already
+                        preprocessed
+  <k_list>              the de Bruijn parameter: a comma-separated
+                        list of integers is required (e.g.,
+                        20,21,23)
+
+ Following input files are required:
+  <base filename>.txt:  Nexus v1.1.0 or lower requires a preprocessed
+                        input text with all genomes readily concatenated,
+                        containing only the following characters:
+                        A, C, G, T, % and $ (at the very end). No
+                        newlines are allowed. Nexus v1.1.1 or higher
+                        can build the index from .fasta files directly.
+
+
+ [options]
   --skip                Skip the building process of the data
                         structures that are independent of the de
                         Bruijn k parameter (i.e., the bidirectional
                         FM-index). These data structures must be
                         available in the directory.
+
+  -f/--fasta            Build the index directly from
+                        .fasta/.fa/.fna files. Contigs or
+                        chromosomes within the fasta files are
+                        ignored and concatenated together. The
+                        input fasta files should be added directly
+                        after this option. Multiple files can be
+                        added. Alternatively, if no filenames are
+                        passed on, Nexus scans the working
+                        directory and includes all fasta files it
+                        can find.
+
+  --fastaWithC          This option is analogous to the --fasta
+                        option, but instead of concatenating
+                        contigs or chromosomes together, they are
+                        considered to be different strains in the
+                        pan-genome.
 
   -s/--sa-sparseness    Suffix array sparseness factors to be
                         used. This option can be repeated multiple
@@ -98,7 +120,7 @@ Options:
                         the checkpoint sparseness. Use "none" to
                         use no checkpoints. [default = 128]
 
-  -p  --progress        Report extra progress updates
+  -p/--progress         Report extra progress updates
 
 ```
 ### Example 1
@@ -116,7 +138,9 @@ After installing Nexus, the nexus directory should look like this:
     ├── CMakeLists.txt
     └── README.md
     
-In this example we will build the implicit representation of the compressed de Bruijn graph for a pan-genome of four E. coli strains. To do this, we will create an `example` folder.
+In this example we will build the implicit representation of the compressed de Bruijn graph for a pan-genome of four E. coli strains. 
+For this example, we assume that the pan-genome text was already preprocessed into one `.txt` file. 
+To execute the example, we will create an `example` folder.
 To create this folder, navigate to the nexus folder. Here, enter the following command
 ```bash
 mkdir example

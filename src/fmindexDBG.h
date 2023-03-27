@@ -125,18 +125,20 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param progress Prints progress if true
      * @param skip If true, the construction of the bidirectional FM-index can
      * be skipped
+     * @param referenceText A string containing the reference text in case the
+     * index is built from fasta files.
      * @param option Select algorithm option
      */
     FMIndexDBG(const std::string& baseFile, const std::vector<uint>& k_list,
                const std::vector<int>& sa_sparse,
                const std::vector<int>& checkpoint_sparseness,
-               const bool progress, const bool skip,
+               const bool progress, const bool skip, std::string& referenceText,
                const SelectOption& option = SelectOption::SIMPLE)
         : FMIndex<positionClass>(0, baseFile) {
 
         if (!skip) {
             // The bidirectional FM-index must still be built
-            createFMIndex(baseFile, sa_sparse);
+            createFMIndex(baseFile, sa_sparse, referenceText);
         }
 
         // Set global k variable to 0 here, since there can be multiple k values
@@ -286,9 +288,12 @@ class FMIndexDBG : public FMIndex<positionClass> {
      *
      * @param baseFN Base filename for FM-index
      * @param sparse_sa Suffix array sparseness factor
+     * @param referenceText A string containing the reference text in case the
+     * index is built from fasta files.
      */
     void createFMIndex(const std::string& baseFN,
-                       const std::vector<int>& sparse_sa);
+                       const std::vector<int>& sparse_sa,
+                       std::string& referenceText);
 
     /**
      * @brief Build the compacted longest common prefix array corresponding to
@@ -871,14 +876,17 @@ class FMIndexDBG : public FMIndex<positionClass> {
      * @param progress prints progress if true
      * @param skip if true, the bidirectional FM-index is already present and
      * must not be rebuilt
+     * @param referenceText A string containing the reference text in case the
+     * index is built from fasta files.
      */
     static void buildFMIndexDBG(const std::string& baseFile,
                                 const std::vector<uint>& k,
                                 const std::vector<int>& sa_sparse,
                                 const std::vector<int>& checkpoint_sparseness,
-                                const bool progress, const bool skip) {
+                                const bool progress, const bool skip,
+                                std::string& referenceText) {
         FMIndexDBG(baseFile, k, sa_sparse, checkpoint_sparseness, progress,
-                   skip);
+                   skip, referenceText);
     }
 
     /**
