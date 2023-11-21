@@ -1,9 +1,21 @@
 # Nexus
 Pan-genome compacted de Bruijn graph using the Bidirectional FM-index with support for lossless approximate pattern matching using search schemes and subgraph visualization. 
 
-Nexus was introduced in [this preprint](https://doi.org/10.21203/rs.3.rs-2583159/v1). If you find this code useful in your research, please cite: 
+Nexus was introduced in [this paper](https://doi.org/10.1186/s12859-023-05531-6). If you find this code useful in your research, please cite: 
 ```
-Lore Depuydt, Luca Renders, Thomas Abeel et al. Pan-genome de Bruijn Graph using the Bidirectional FM-index, 22 February 2023, PREPRINT (Version 1) available at Research Square [https://doi.org/10.21203/rs.3.rs-2583159/v1]
+﻿@Article{Depuydt2023,
+    author={Depuydt, Lore and Renders, Luca and Abeel, Thomas and Fostier, Jan},
+    title={Pan-genome de Bruijn graph using the bidirectional FM-index},
+    journal={BMC Bioinformatics},
+    year={2023},
+    month={Oct},
+    day={26},
+    volume={24},
+    number={1},
+    pages={400},
+    issn={1471-2105},
+    doi={10.1186/s12859-023-05531-6}
+}
 ```
 
 **Important:** To use Nexus v1.1.0 or higher instead of v1.0.0, the index must be rebuilt. 
